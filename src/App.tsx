@@ -226,17 +226,47 @@ function App() {
   }, [])
 
   useEffect(() => {
+    let isMounted = true
+
     const hydrateSession = async () => {
       try {
+        const session = await api.getSession()
+        if (!session) {
+          if (isMounted) {
+            setSessionUser(null)
+          }
+          return
+        }
+
         const user = await api.getCurrentUser()
+        if (!isMounted) {
+          return
+        }
         setSessionUser(user)
         setView(user.role)
       } catch {
-        setSessionUser(null)
+        if (isMounted) {
+          setSessionUser(null)
+        }
       }
     }
 
+    const unsubscribe = api.onAuthStateChange((user) => {
+      if (!isMounted) {
+        return
+      }
+      setSessionUser(user)
+      if (user) {
+        setView(user.role)
+      }
+    })
+
     void hydrateSession()
+
+    return () => {
+      isMounted = false
+      unsubscribe()
+    }
   }, [])
 
   const refreshAdminOverview = async () => {

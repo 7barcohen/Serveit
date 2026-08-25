@@ -1,27 +1,25 @@
-# Serveit - Stage 5
+# Serveit - Supabase Edition
 
 פלטפורמת מרקטפלייס לעבודות מזדמנות בישראל.
 
 ## מה יש בשלב הזה
 
 - פרונט React עם ממשקי עובד ומעסיק.
-- שרת Express עם אימות JWT והרשאות לפי תפקיד.
-- אימות מבוסס Cookies עם Access + Refresh ו-rotation.
-- בסיס נתונים PostgreSQL עם Prisma ORM.
+- ארכיטקטורת Serverless מבוססת Vercel + Supabase.
+- אימות ישיר עם Supabase Auth.
+- CRUD ישיר מול טבלאות Supabase/Postgres מהקליינט.
 - מודלים עבור משתמשים, פרופילי עובד/מעסיק, משרות, מועמדויות, תוכניות מנוי ושליחת מסמכים.
 - מדיניות ביטולים עם נקודות קנס אמינות.
 - דירוגים אחרי עבודה ועדכון ממוצע אמינות עובד.
 - מסך אדמין עשיר עם טבלאות משתמשים, דוח אמינות, השעיה ידנית וחישוב השעיות אוטומטי.
-- דאטה התחלתי באמצעות seed.
 
 ## מחסנית טכנולוגית
 
 - Frontend: React + TypeScript + Vite
-- Backend: Node.js + Express + TypeScript
-- ORM: Prisma
-- Database: PostgreSQL
-- Validation: Zod
-- Auth: JWT + bcrypt
+- Hosting: Vercel
+- Backend/Data/Auth: Supabase
+- Database: PostgreSQL (via Supabase)
+- Auth: Supabase Auth
 
 ## הפעלה מקומית
 
@@ -37,31 +35,14 @@ npm install
 cp .env.example .env
 ```
 
-3. העלאת PostgreSQL:
+3. הגדרת משתני Supabase בתוך `.env`:
 
 ```bash
-npm run db:up
+VITE_SUPABASE_URL=...
+VITE_SUPABASE_ANON_KEY=...
 ```
 
-4. יצירת Prisma Client:
-
-```bash
-npm run db:generate
-```
-
-5. הרצת מיגרציה:
-
-```bash
-npm run db:migrate
-```
-
-6. זריעת נתונים התחלתיים:
-
-```bash
-npm run db:seed
-```
-
-7. הרצת הפרויקט (שרת + קליינט):
+4. הרצת הפרויקט:
 
 ```bash
 npm run dev
@@ -70,53 +51,21 @@ npm run dev
 ## כתובות שירות
 
 - Web: http://localhost:5173
-- API: http://localhost:4000
 
 ## פקודות שימושיות
 
 - Build: npm run build
 - Lint: npm run lint
-- כיבוי DB: npm run db:down
-- איפוס DB: npm run db:reset
 
 ## מבנה פרויקט
 
 - src/App.tsx - מסכי המוצר הראשיים
-- src/api.ts - לקוח API בצד הפרונט
+- src/api.ts - שכבת נתונים ואימות מול Supabase
+- src/lib/supabase.ts - יצירת Supabase Client
 - src/types.ts - טיפוסים בצד הפרונט
-- backend/src/server.ts - נתיבי API ולוגיקה עסקית
-- backend/src/middleware/auth.ts - אימות והרשאות
-- backend/src/lib/prisma.ts - Prisma Client
-- prisma/schema.prisma - סכמת מסד הנתונים
-- prisma/seed.ts - דאטה התחלתי
-- docker-compose.yml - PostgreSQL מקומי
 
-## נקודות כניסה של API
+## הערות פריסה
 
-- GET /api/health
-- GET /api/bootstrap
-- POST /api/jobs
-- POST /api/applications
-- PATCH /api/applications/:id
-- POST /api/documents/send
-- POST /api/applications/:id/cancel
-- POST /api/applications/:id/reviews
-- POST /api/auth/register
-- POST /api/auth/login
-- GET /api/auth/me
-- POST /api/auth/refresh
-- POST /api/auth/logout
-- POST /api/auth/mock-login
-- GET /api/admin/overview
-- GET /api/admin/users
-- GET /api/admin/trust-report
-- POST /api/admin/suspensions/recalculate
-- PATCH /api/admin/users/:id/suspension
-- PATCH /api/admin/workers/:userId/verify
-- PATCH /api/admin/employers/:userId/verify
-
-## משתמשי דמו אחרי seed
-
-- עובד: worker@serveit.local
-- מעסיק: employer@serveit.local
-- סיסמה: Serveit123!
+- יש להגדיר ב-Vercel את `VITE_SUPABASE_URL` ואת `VITE_SUPABASE_ANON_KEY`
+- יש להפעיל ב-Supabase Auth ספק Email/Password
+- יש לוודא שטבלאות Supabase תואמות לסכמה שבה משתמש `src/api.ts`
