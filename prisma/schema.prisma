@@ -1,0 +1,157 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  WORKER
+  EMPLOYER
+  ADMIN
+}
+
+enum VerificationLevel {
+  BASIC
+  VERIFIED
+}
+
+enum ShiftWindow {
+  MORNING
+  AFTERNOON
+  EVENING
+  NIGHT
+}
+
+enum ApplicationState {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum CancellationActor {
+  WORKER
+  EMPLOYER
+  ADMIN
+}
+
+model User {
+  id              Int               @id @default(autoincrement())
+  email           String            @unique
+  passwordHash    String
+  role            UserRole
+  isSuspended     Boolean           @default(false)
+  suspensionReason String?
+  suspendedAt     DateTime?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  workerProfile   WorkerProfile?
+  employerProfile EmployerProfile?
+  jobs            Job[]
+  applications    Application[]
+  reviewsGiven    ApplicationReview[] @relation("reviewer")
+  refreshSessions RefreshSession[]
+}
+
+model WorkerProfile {
+  id                Int               @id @default(autoincrement())
+  userId            Int               @unique
+  fullName          String
+  age               Int
+  city              String
+  rating            Decimal           @default(0) @db.Decimal(3, 2)
+  verificationLevel VerificationLevel @default(BASIC)
+  tags              String[]
+  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model EmployerProfile {
+  id              Int          @id @default(autoincrement())
+  userId          Int          @unique
+  displayName     String
+  isVerified      Boolean      @default(false)
+  activePlanId    Int?
+  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  activePlan      EmployerPlan? @relation(fields: [activePlanId], references: [id])
+}
+
+model EmployerPlan {
+  id            Int               @id @default(autoincrement())
+  code          String            @unique
+  name          String
+  monthlyPrice  Int
+  openingsLimit Int
+  features      String[]
+  employers     EmployerProfile[]
+}
+
+model Job {
+  id               Int          @id @default(autoincrement())
+  title            String
+  category         String
+  city             String
+  date             DateTime
+  shift            ShiftWindow
+  hourlyPay        Int
+  description      String
+  transportOffered Boolean      @default(false)
+  transportFrom    String?
+  verifiedEmployer Boolean      @default(false)
+  employerId       Int
+  employer         User         @relation(fields: [employerId], references: [id], onDelete: Cascade)
+  applications     Application[]
+  createdAt        DateTime     @default(now())
+}
+
+model Application {
+  id                 Int               @id @default(autoincrement())
+  jobId              Int
+  workerId           Int
+  state              ApplicationState  @default(PENDING)
+  canceledAt         DateTime?
+  canceledBy         CancellationActor?
+  cancellationReason String?
+  penaltyPoints      Int               @default(0)
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  job                Job               @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  worker             User              @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  reviews            ApplicationReview[]
+
+  @@unique([jobId, workerId])
+}
+
+model ApplicationReview {
+  id            Int         @id @default(autoincrement())
+  applicationId Int
+  reviewerId    Int
+  score         Int
+  comment       String?
+  createdAt     DateTime    @default(now())
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  reviewer      User        @relation("reviewer", fields: [reviewerId], references: [id], onDelete: Cascade)
+
+  @@unique([applicationId, reviewerId])
+}
+
+model DocumentDispatch {
+  id           Int      @id @default(autoincrement())
+  jobId         Int
+  documentUrl   String
+  recipients    Int[]
+  sentAt        DateTime @default(now())
+}
+
+model RefreshSession {
+  id         Int       @id @default(autoincrement())
+  userId     Int
+  tokenHash  String
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}

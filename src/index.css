@@ -1,0 +1,76 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;700;800&family=Outfit:wght@500;700;800&display=swap');
+
+:root {
+  --bg: #fff7ef;
+  --paper: #fffdf9;
+  --ink: #2f2647;
+  --ink-soft: #6f6489;
+  --brand-coral: #ff6e2f;
+  --brand-ink: #ff4ea3;
+  --brand-mint: #26c6a0;
+  --border: #e6cce5;
+  --theme-hot: #ff6a2b;
+  --theme-warm: #f84fa4;
+  --theme-fresh: #2dc29a;
+  --theme-line: #f0d4e8;
+
+  font-family: 'Plus Jakarta Sans', 'Heebo', 'Rubik', 'Assistant', 'Avenir Next', 'Segoe UI', sans-serif;
+  font-size: 16px;
+  line-height: 1.45;
+  font-weight: 400;
+  color: var(--ink);
+  background: var(--bg);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at 10% 8%, rgba(255, 122, 69, 0.26), transparent 34%),
+    radial-gradient(circle at 88% 5%, rgba(255, 78, 163, 0.2), transparent 30%),
+    radial-gradient(circle at 82% 74%, rgba(38, 198, 160, 0.2), transparent 34%),
+    linear-gradient(180deg, #fff6e9 0%, #fff3f9 50%, #edfff8 100%);
+}
+
+#root {
+  min-height: 100vh;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+h1,
+h2,
+h3 {
+  font-family: 'Outfit', 'Plus Jakarta Sans', sans-serif;
+  letter-spacing: -0.02em;
+}
+
+h1 {
+  font-size: clamp(1.95rem, 3vw, 2.55rem);
+  margin-bottom: 6px;
+  letter-spacing: -0.03em;
+}
+
+h2 {
+  font-size: 1.22rem;
+  margin-bottom: 10px;
+}
+
+ul {
+  padding-right: 18px;
+  margin: 10px 0 0;
+}
