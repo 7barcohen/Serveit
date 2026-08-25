@@ -442,7 +442,7 @@ function App() {
           return
         }
 
-        await api.register({
+        const result = await api.register({
           email: authForm.email,
           password: authForm.password,
           role: authForm.role,
@@ -451,14 +451,25 @@ function App() {
           city: authForm.city.trim() || undefined,
           age: authForm.age,
         })
+
+        if (result.requiresEmailConfirmation) {
+          setError('ההרשמה נקלטה. צריך לאשר את כתובת האימייל במייל שנשלח ואז להתחבר.')
+          setAuthMode('login')
+          return
+        }
       }
 
       const user = await api.getCurrentUser()
       setSessionUser(user)
       setView(user.role)
       await loadBootstrap()
-    } catch {
-      setError('התחברות/הרשמה נכשלה. בדוק פרטים ונסה שוב.')
+    } catch (caughtError) {
+      const message = caughtError instanceof Error ? caughtError.message : ''
+      if (message) {
+        setError(message)
+      } else {
+        setError('התחברות/הרשמה נכשלה. בדוק פרטים ונסה שוב.')
+      }
     } finally {
       setAuthLoading(false)
     }

@@ -60,6 +60,7 @@ export type BootstrapPayload = {
 export type AuthResponse = {
   role: UserRole
   userId: number
+  requiresEmailConfirmation?: boolean
 }
 
 export type AuthUser = {

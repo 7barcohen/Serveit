@@ -115,7 +115,7 @@ const getSessionUser = async () => {
   }
   const authUser = data.session?.user
   if (!authUser) {
-    throw new Error('Unauthorized')
+    throw new Error('No active Supabase session')
   }
   return authUser
 }
@@ -374,7 +374,7 @@ export const api = {
     age?: number
     displayName?: string
   }): Promise<AuthResponse> => {
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email: payload.email,
       password: payload.password,
       options: {
@@ -394,6 +394,7 @@ export const api = {
     return {
       role: payload.role,
       userId: appUser.id,
+      requiresEmailConfirmation: !data.session,
     }
   },
 
