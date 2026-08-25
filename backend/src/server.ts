@@ -21,7 +21,7 @@ const app = express()
 
 app.use(
   cors({
-    origin: true,
+    origin: env.corsOrigin ? env.corsOrigin.split(',').map((origin) => origin.trim()) : true,
     credentials: true,
   }),
 )
@@ -111,14 +111,16 @@ const applyAuthCookies = (res: express.Response, accessToken: string, refreshTok
   res.cookie('access_token', accessToken, {
     httpOnly: true,
     secure: env.cookieSecure,
-    sameSite: 'lax',
+    sameSite: env.cookieSameSite,
+    domain: env.cookieDomain,
     maxAge: 1000 * 60 * 15,
   })
 
   res.cookie('refresh_token', refreshToken, {
     httpOnly: true,
     secure: env.cookieSecure,
-    sameSite: 'strict',
+    sameSite: env.cookieSameSite,
+    domain: env.cookieDomain,
     maxAge: 1000 * 60 * 60 * 24 * env.refreshTokenTtlDays,
   })
 }

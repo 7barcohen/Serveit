@@ -12,7 +12,20 @@ import type {
   UserRole,
 } from './types'
 
-const apiBase = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000'
+const configuredApiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim()
+const runningOnLocalhost =
+  typeof window !== 'undefined' &&
+  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+const configuredPointsToLocalhost =
+  typeof configuredApiBase === 'string' && /localhost|127\.0\.0\.1/.test(configuredApiBase)
+
+const apiBase = configuredApiBase
+  ? configuredPointsToLocalhost && !runningOnLocalhost
+    ? ''
+    : configuredApiBase
+  : import.meta.env.DEV
+    ? 'http://localhost:4000'
+    : ''
 
 const fetchWithCookies = async (url: string, init?: RequestInit): Promise<Response> => {
   return fetch(url, {
