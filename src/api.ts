@@ -108,6 +108,33 @@ const mapApplication = (row: {
   penaltyPoints: row.penaltyPoints,
 })
 
+const isAppDataAccessError = (error: unknown) => {
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase()
+  return (
+    message.includes('row-level security') ||
+    message.includes('permission denied') ||
+    message.includes('violates') ||
+    message.includes('not found') ||
+    message.includes('does not exist') ||
+    message.includes('schema cache') ||
+    message.includes('relation')
+  )
+}
+
+const buildAuthUserFromSession = (params: {
+  email: string
+  role: UserRole
+  fullName?: string
+  displayName?: string
+}): AuthUser => ({
+  id: 0,
+  email: params.email,
+  role: params.role,
+  fullName: params.fullName ?? null,
+  displayName: params.displayName ?? null,
+  isSuspended: false,
+})
+
 const getSessionUser = async () => {
   const { data, error } = await supabase.auth.getSession()
   if (error) {
@@ -214,11 +241,24 @@ const ensureAppUser = async (params: {
 const requireAppUserFromSession = async () => {
   const authUser = await getSessionUser()
   const fallbackRole = extractRoleFromMeta(authUser.user_metadata as Record<string, unknown> | undefined) ?? 'worker'
-  const appUser = await ensureAppUser({
-    email: authUser.email ?? '',
-    role: fallbackRole,
-  })
-  return appUser
+  try {
+    const appUser = await ensureAppUser({
+      email: authUser.email ?? '',
+      role: fallbackRole,
+    })
+    return appUser
+  } catch (error) {
+    if (!isAppDataAccessError(error)) {
+      throw error
+    }
+
+    return {
+      id: 0,
+      email: authUser.email ?? '',
+      role: roleInMap[fallbackRole],
+      isSuspended: false,
+    }
+  }
 }
 
 export const api = {
@@ -322,17 +362,35 @@ export const api = {
   getCurrentUser: async (): Promise<AuthUser> => {
     const authUser = await getSessionUser()
     const fallbackRole = extractRoleFromMeta(authUser.user_metadata as Record<string, unknown> | undefined) ?? 'worker'
-    const appUser = await ensureAppUser({
-      email: authUser.email ?? '',
-      role: fallbackRole,
-      fullName: typeof authUser.user_metadata.fullName === 'string' ? authUser.user_metadata.fullName : undefined,
-      displayName:
-        typeof authUser.user_metadata.displayName === 'string'
-          ? authUser.user_metadata.displayName
-          : undefined,
-      city: typeof authUser.user_metadata.city === 'string' ? authUser.user_metadata.city : undefined,
-      age: typeof authUser.user_metadata.age === 'number' ? authUser.user_metadata.age : undefined,
-    })
+    const metadataFullName =
+      typeof authUser.user_metadata.fullName === 'string' ? authUser.user_metadata.fullName : undefined
+    const metadataDisplayName =
+      typeof authUser.user_metadata.displayName === 'string'
+        ? authUser.user_metadata.displayName
+        : undefined
+
+    let appUser: Awaited<ReturnType<typeof ensureAppUser>>
+    try {
+      appUser = await ensureAppUser({
+        email: authUser.email ?? '',
+        role: fallbackRole,
+        fullName: metadataFullName,
+        displayName: metadataDisplayName,
+        city: typeof authUser.user_metadata.city === 'string' ? authUser.user_metadata.city : undefined,
+        age: typeof authUser.user_metadata.age === 'number' ? authUser.user_metadata.age : undefined,
+      })
+    } catch (error) {
+      if (!isAppDataAccessError(error)) {
+        throw error
+      }
+
+      return buildAuthUserFromSession({
+        email: authUser.email ?? '',
+        role: fallbackRole,
+        fullName: metadataFullName,
+        displayName: metadataDisplayName,
+      })
+    }
 
     let fullName: string | null = null
     let displayName: string | null = null
@@ -390,10 +448,19 @@ export const api = {
 
     if (error) throw error
 
-    const appUser = await ensureAppUser(payload)
+    let appUserId = 0
+    try {
+      const appUser = await ensureAppUser(payload)
+      appUserId = appUser.id
+    } catch (caughtError) {
+      if (!isAppDataAccessError(caughtError)) {
+        throw caughtError
+      }
+    }
+
     return {
       role: payload.role,
-      userId: appUser.id,
+      userId: appUserId,
       requiresEmailConfirmation: !data.session,
     }
   },
@@ -405,14 +472,24 @@ export const api = {
     }
 
     const roleFromMeta = extractRoleFromMeta(data.user.user_metadata as Record<string, unknown> | undefined)
-    const appUser = await ensureAppUser({
-      email: payload.email,
-      role: roleFromMeta ?? 'worker',
-    })
+    let appUserId = 0
+    let appRole = roleFromMeta ?? 'worker'
+    try {
+      const appUser = await ensureAppUser({
+        email: payload.email,
+        role: roleFromMeta ?? 'worker',
+      })
+      appUserId = appUser.id
+      appRole = roleOutMap[appUser.role as 'WORKER' | 'EMPLOYER' | 'ADMIN']
+    } catch (caughtError) {
+      if (!isAppDataAccessError(caughtError)) {
+        throw caughtError
+      }
+    }
 
     return {
-      role: roleOutMap[appUser.role as 'WORKER' | 'EMPLOYER' | 'ADMIN'],
-      userId: appUser.id,
+      role: appRole,
+      userId: appUserId,
     }
   },
 
