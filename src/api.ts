@@ -1,20 +1,40 @@
 import type {
   AdminOverview,
   AdminUserRow,
+  AppNotification,
   Application,
-  ApplicationState,
+  ApplicationStage,
   AuthResponse,
   AuthUser,
-  BootstrapPayload,
+  BusinessVerificationInput,
+  Candidate,
+  ChatMessage,
+  City,
+  ContactViolationRow,
+  EmployerPlan,
+  EmployerProfile,
+  EmployerProfileUpdate,
   EmploymentType,
   Job,
-  Region,
+  JobCategory,
+  JobOfferInput,
+  ManagedJob,
+  PayType,
+  PendingLicenseRow,
+  PublicEmployerProfile,
+  ReliabilityEvent,
   ShiftWindow,
-  TrustReportRow,
+  SponsorshipRequestRow,
+  SubscriptionStatus,
+  SwipeDirection,
+  UserReportRow,
   UserRole,
+  Workload,
+  WorkerLicense,
   WorkerPreference,
   WorkerPreferenceInput,
   WorkerProfile,
+  WorkerProfileUpdate,
 } from './types'
 import { supabase } from './lib/supabase'
 
@@ -44,18 +64,6 @@ const shiftInMap: Record<ShiftWindow, 'MORNING' | 'AFTERNOON' | 'EVENING' | 'NIG
   night: 'NIGHT',
 }
 
-const appStateOutMap: Record<'PENDING' | 'APPROVED' | 'REJECTED', ApplicationState> = {
-  PENDING: 'pending',
-  APPROVED: 'approved',
-  REJECTED: 'rejected',
-}
-
-const appStateInMap: Record<ApplicationState, 'PENDING' | 'APPROVED' | 'REJECTED'> = {
-  pending: 'PENDING',
-  approved: 'APPROVED',
-  rejected: 'REJECTED',
-}
-
 const employmentTypeOutMap: Record<'TEMPORARY' | 'PERMANENT', EmploymentType> = {
   TEMPORARY: 'temporary',
   PERMANENT: 'permanent',
@@ -66,113 +74,376 @@ const employmentTypeInMap: Record<EmploymentType, 'TEMPORARY' | 'PERMANENT'> = {
   permanent: 'PERMANENT',
 }
 
-// DB "Region" enum values are the upper-case form of the client values (TEL_AVIV <-> tel_aviv).
-const regionOut = (value: string) => value.toLowerCase() as Region
-const regionIn = (value: Region) => value.toUpperCase()
+// The remaining DB enums are the upper-case form of the client values
+// (TEL_AVIV <-> tel_aviv, NO_SHOW <-> no_show).
+const fromDb = <T extends string>(value: string) => value.toLowerCase() as T
+const toDb = (value: string) => value.toUpperCase()
+const fromDbOrNull = <T extends string>(value: string | null) => (value ? fromDb<T>(value) : null)
 
 const toNumber = (value: unknown, fallback = 0): number => {
   const parsed = typeof value === 'number' ? value : Number(value)
   return Number.isFinite(parsed) ? parsed : fallback
 }
 
-const mapWorkerPreference = (row: {
+const toNumberOrNull = (value: unknown) => (value === null || value === undefined ? null : toNumber(value))
+
+// Timestamps stored at UTC midnight for a calendar day -> 'YYYY-MM-DD'.
+const toDay = (value: string) => new Date(value).toISOString().slice(0, 10)
+
+const fail = (error: { message: string } | null, fallback: string): never => {
+  throw new Error(error?.message || fallback)
+}
+
+const rpc = async <T>(fn: string, args?: Record<string, unknown>): Promise<T> => {
+  const { data, error } = await supabase.rpc(fn, args)
+  if (error) fail(error, 'הפעולה נכשלה')
+  return data as T
+}
+
+const companyMediaUrl = (path: string | null) =>
+  path ? supabase.storage.from('company-media').getPublicUrl(path).data.publicUrl : null
+
+const signedUrl = async (bucket: string, path: string) => {
+  const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, 60 * 60)
+  if (error || !data) fail(error, 'טעינת הקובץ נכשלה')
+  return data!.signedUrl
+}
+
+const fileExtension = (file: Blob, fallback: string) => {
+  if (file instanceof File && file.name.includes('.')) return file.name.split('.').pop()!.toLowerCase()
+  return file.type.split('/')[1]?.split(';')[0] ?? fallback
+}
+
+const uploadFile = async (bucket: string, folder: string, file: Blob, fallbackExt: string) => {
+  const path = `${folder}/${crypto.randomUUID()}.${fileExtension(file, fallbackExt)}`
+  const { error } = await supabase.storage.from(bucket).upload(path, file, { contentType: file.type || undefined })
+  if (error) fail(error, 'העלאת הקובץ נכשלה')
+  return path
+}
+
+type WorkerPreferenceRow = {
   id: number
   employmentType: 'TEMPORARY' | 'PERMANENT'
+  city: string | null
+  radiusKm: number
   minHourlyPay: number
-  preferredShifts: Array<'MORNING' | 'AFTERNOON' | 'EVENING' | 'NIGHT'>
-  regions: string[]
+  minMonthlyPay: number
+  categories: string[]
+  workloads: string[]
   availableDates: string[]
   transportOnly: boolean
-}): WorkerPreference => ({
+}
+
+const mapWorkerPreference = (row: WorkerPreferenceRow): WorkerPreference => ({
   id: row.id,
   employmentType: employmentTypeOutMap[row.employmentType],
+  city: row.city,
+  radiusKm: row.radiusKm,
   minHourlyPay: row.minHourlyPay,
-  preferredShifts: row.preferredShifts.map((shift) => shiftOutMap[shift]),
-  regions: row.regions.map(regionOut),
+  minMonthlyPay: row.minMonthlyPay,
+  categories: row.categories,
+  workloads: row.workloads.map((value) => fromDb<Workload>(value)),
   availableDates: row.availableDates,
   transportOnly: row.transportOnly,
 })
 
-const mapJob = (
-  row: {
-    id: number
-    title: string
-    category: string
-    city: string
-    region: string | null
-    employmentType: 'TEMPORARY' | 'PERMANENT'
-    date: string
-    shift: 'MORNING' | 'AFTERNOON' | 'EVENING' | 'NIGHT'
-    hourlyPay: number
-    description: string
-    transportOffered: boolean
-    transportFrom: string | null
-    verifiedEmployer: boolean
-    employerId: number
-  },
-  employerName: string,
-): Job => ({
+type JobFeedRow = {
+  id: number
+  title: string
+  category: string
+  city: string
+  region: string | null
+  lat: number | null
+  lng: number | null
+  employmentType: 'TEMPORARY' | 'PERMANENT'
+  date: string
+  shift: 'MORNING' | 'AFTERNOON' | 'EVENING' | 'NIGHT'
+  payType: string
+  hourlyPay: number | null
+  monthlyPay: number | null
+  workload: string | null
+  description: string
+  transportOffered: boolean
+  transportFrom: string | null
+  requiredWorkers: number
+  hiredCount: number
+  status: string
+  isSponsored: boolean
+  employerId: number
+  employerName: string
+  employerLogoPath: string | null
+  employerDescription: string
+  employerVerified: boolean
+  employerRatingAvg: number | null
+  employerRatingCount: number
+  employerLowRating: boolean | null
+  requiredLicense: string | null
+}
+
+const mapJob = (row: JobFeedRow): Job => ({
   id: row.id,
   title: row.title,
   category: row.category,
   city: row.city,
-  region: row.region ? regionOut(row.region) : null,
+  region: fromDbOrNull(row.region),
+  lat: row.lat,
+  lng: row.lng,
   employmentType: employmentTypeOutMap[row.employmentType],
-  date: new Date(row.date).toISOString().slice(0, 10),
+  date: toDay(row.date),
   shift: shiftOutMap[row.shift],
+  payType: fromDb<PayType>(row.payType),
   hourlyPay: row.hourlyPay,
+  monthlyPay: row.monthlyPay,
+  workload: fromDbOrNull(row.workload),
   description: row.description,
-  employerName,
   transportOffered: row.transportOffered,
   transportFrom: row.transportFrom ?? undefined,
-  verifiedEmployer: row.verifiedEmployer,
+  requiredWorkers: row.requiredWorkers,
+  hiredCount: row.hiredCount,
+  status: fromDb(row.status),
+  isSponsored: row.isSponsored,
+  employerId: row.employerId,
+  employerName: row.employerName,
+  employerLogoUrl: companyMediaUrl(row.employerLogoPath),
+  employerDescription: row.employerDescription,
+  verifiedEmployer: row.employerVerified,
+  employerRatingAvg: toNumberOrNull(row.employerRatingAvg),
+  employerRatingCount: row.employerRatingCount,
+  employerLowRating: row.employerLowRating ?? false,
+  requiredLicense: row.requiredLicense,
 })
 
-const mapApplication = (row: {
+type ManagedJobRow = {
+  id: number
+  title: string
+  category: string
+  city: string
+  employmentType: 'TEMPORARY' | 'PERMANENT'
+  date: string
+  shift: 'MORNING' | 'AFTERNOON' | 'EVENING' | 'NIGHT'
+  payType: string
+  hourlyPay: number | null
+  monthlyPay: number | null
+  workload: string | null
+  requiredWorkers: number
+  status: string
+  description: string
+  sponsoredUntil: string | null
+  createdAt: string
+}
+
+const mapManagedJob = (row: ManagedJobRow): ManagedJob => ({
+  id: row.id,
+  title: row.title,
+  category: row.category,
+  city: row.city,
+  employmentType: employmentTypeOutMap[row.employmentType],
+  date: toDay(row.date),
+  shift: shiftOutMap[row.shift],
+  payType: fromDb<PayType>(row.payType),
+  hourlyPay: row.hourlyPay,
+  monthlyPay: row.monthlyPay,
+  workload: fromDbOrNull(row.workload),
+  requiredWorkers: row.requiredWorkers,
+  status: fromDb(row.status),
+  description: row.description,
+  sponsoredUntil: row.sponsoredUntil,
+  createdAt: row.createdAt,
+})
+
+type ApplicationRow = {
   id: number
   jobId: number
   workerId: number
-  state: 'PENDING' | 'APPROVED' | 'REJECTED'
+  employerId: number
+  stage: string
+  workerSwipe: string | null
+  employerSwipe: string | null
+  matchedAt: string | null
   canceledAt: string | null
+  canceledBy: string | null
   cancellationReason: string | null
-  canceledBy: 'WORKER' | 'EMPLOYER' | 'ADMIN' | null
-  penaltyPoints: number
-}): Application => ({
+  arrivedLate: boolean
+  completedAt: string | null
+  paidAmount: number | null
+  declineReason: string | null
+  createdAt: string
+  jobTitle: string
+  jobCategory: string
+  jobCity: string
+  jobDate: string
+  jobShift: 'MORNING' | 'AFTERNOON' | 'EVENING' | 'NIGHT'
+  jobEmploymentType: 'TEMPORARY' | 'PERMANENT'
+  jobPayType: string
+  jobHourlyPay: number | null
+  jobMonthlyPay: number | null
+  jobStatus: string
+  jobRequiredWorkers: number
+  jobHiredCount: number
+  employerName: string
+  employerLogoPath: string | null
+  employerRatingAvg: number | null
+  workerFirstName: string
+  workerReliabilityScore: number
+  workerRating: number | null
+  workerCity: string | null
+  offerId: number | null
+  offerStatus: string | null
+  offerStartsAt: string | null
+  offerEndsAt: string | null
+  offerAddress: string | null
+  offerPayType: string | null
+  offerPayAmount: number | null
+  offerConditions: string | null
+  offerExpiresAt: string | null
+  offerFromWaitlist: boolean | null
+  waitlistPosition: number | null
+  lastMessageAt: string | null
+  reviewedByMe: boolean
+}
+
+const mapApplication = (row: ApplicationRow): Application => ({
   id: row.id,
   jobId: row.jobId,
   workerId: row.workerId,
-  state: appStateOutMap[row.state],
+  employerId: row.employerId,
+  stage: fromDb(row.stage),
+  workerSwipe: fromDbOrNull(row.workerSwipe),
+  employerSwipe: fromDbOrNull(row.employerSwipe),
+  matchedAt: row.matchedAt,
   canceledAt: row.canceledAt,
+  canceledBy: fromDbOrNull(row.canceledBy),
   cancellationReason: row.cancellationReason,
-  canceledBy: row.canceledBy?.toLowerCase() ?? null,
-  penaltyPoints: row.penaltyPoints,
+  arrivedLate: row.arrivedLate,
+  completedAt: row.completedAt,
+  paidAmount: row.paidAmount,
+  declineReason: row.declineReason,
+  createdAt: row.createdAt,
+  job: {
+    title: row.jobTitle,
+    category: row.jobCategory,
+    city: row.jobCity,
+    date: toDay(row.jobDate),
+    shift: shiftOutMap[row.jobShift],
+    employmentType: employmentTypeOutMap[row.jobEmploymentType],
+    payType: fromDb(row.jobPayType),
+    hourlyPay: row.jobHourlyPay,
+    monthlyPay: row.jobMonthlyPay,
+    status: fromDb(row.jobStatus),
+    requiredWorkers: row.jobRequiredWorkers,
+    hiredCount: row.jobHiredCount,
+  },
+  employer: {
+    name: row.employerName,
+    logoUrl: companyMediaUrl(row.employerLogoPath),
+    ratingAvg: toNumberOrNull(row.employerRatingAvg),
+  },
+  worker: {
+    firstName: row.workerFirstName,
+    reliabilityScore: row.workerReliabilityScore,
+    rating: toNumber(row.workerRating, 0),
+    city: row.workerCity,
+  },
+  offer: row.offerId
+    ? {
+        id: row.offerId,
+        status: fromDb(row.offerStatus!),
+        startsAt: row.offerStartsAt!,
+        endsAt: row.offerEndsAt!,
+        address: row.offerAddress!,
+        payType: fromDb(row.offerPayType!),
+        payAmount: row.offerPayAmount!,
+        conditions: row.offerConditions ?? '',
+        expiresAt: row.offerExpiresAt!,
+        fromWaitlist: row.offerFromWaitlist ?? false,
+      }
+    : null,
+  waitlistPosition: row.waitlistPosition,
+  lastMessageAt: row.lastMessageAt,
+  reviewedByMe: row.reviewedByMe,
 })
 
-const isAppDataAccessError = (error: unknown) => {
-  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase()
-  return (
-    message.includes('row-level security') ||
-    message.includes('permission denied') ||
-    message.includes('violates') ||
-    message.includes('not found') ||
-    message.includes('does not exist') ||
-    message.includes('schema cache') ||
-    message.includes('relation')
-  )
+type ChatMessageRow = {
+  id: number
+  applicationId: number
+  senderId: number | null
+  body: string | null
+  audioPath: string | null
+  wasFiltered: boolean
+  createdAt: string
 }
 
-const buildAuthUserFromSession = (params: {
-  email: string
-  role: UserRole
-  fullName?: string
-  displayName?: string
-}): AuthUser => ({
-  id: 0,
-  email: params.email,
-  role: params.role,
-  fullName: params.fullName ?? null,
-  displayName: params.displayName ?? null,
-  isSuspended: false,
+const mapChatMessage = (row: ChatMessageRow): ChatMessage => ({
+  id: row.id,
+  applicationId: row.applicationId,
+  senderId: row.senderId,
+  body: row.body,
+  audioPath: row.audioPath,
+  wasFiltered: row.wasFiltered,
+  createdAt: row.createdAt,
+})
+
+type NotificationRow = {
+  id: number
+  type: string
+  title: string
+  body: string
+  applicationId: number | null
+  jobId: number | null
+  readAt: string | null
+  createdAt: string
+}
+
+const mapNotification = (row: NotificationRow): AppNotification => ({ ...row })
+
+type EmployerProfileRow = {
+  userId: number
+  displayName: string
+  description: string
+  logoPath: string | null
+  photoPaths: string[]
+  regions: string[]
+  form101Url: string | null
+  isVerified: boolean
+  businessId: string | null
+  legalName: string | null
+  businessAddress: string | null
+  representativeName: string | null
+  representativePhone: string | null
+  verificationRequestedAt: string | null
+  verificationNote: string | null
+  trialEndsAt: string
+  subscriptionStatus: string
+  activePlanId: number | null
+  ratingAvg: number | null
+  ratingCount: number
+  ratingWarningAt: string | null
+}
+
+const mapEmployerProfile = (row: EmployerProfileRow): EmployerProfile => ({
+  id: row.userId,
+  displayName: row.displayName,
+  description: row.description,
+  logoPath: row.logoPath,
+  logoUrl: companyMediaUrl(row.logoPath),
+  photoPaths: row.photoPaths,
+  photoUrls: row.photoPaths.map((path) => companyMediaUrl(path)!),
+  regions: row.regions.map((region) => fromDb(region)),
+  form101Url: row.form101Url,
+  isVerified: row.isVerified,
+  businessId: row.businessId,
+  legalName: row.legalName,
+  businessAddress: row.businessAddress,
+  representativeName: row.representativeName,
+  representativePhone: row.representativePhone,
+  verificationRequestedAt: row.verificationRequestedAt,
+  verificationNote: row.verificationNote,
+  trialEndsAt: row.trialEndsAt,
+  subscriptionStatus: fromDb<SubscriptionStatus>(row.subscriptionStatus),
+  activePlanId: row.activePlanId,
+  ratingAvg: toNumberOrNull(row.ratingAvg),
+  ratingCount: row.ratingCount,
+  ratingWarningAt: row.ratingWarningAt,
 })
 
 const getSessionUser = async () => {
@@ -187,118 +458,13 @@ const getSessionUser = async () => {
   return authUser
 }
 
-const getOptionalSessionUser = async () => {
-  const { data, error } = await supabase.auth.getSession()
-  if (error) {
-    throw error
-  }
-  return data.session?.user ?? null
-}
-
-const extractRoleFromMeta = (meta: Record<string, unknown> | undefined): UserRole | null => {
-  const role = meta?.role
-  if (role === 'worker' || role === 'employer' || role === 'admin') {
-    return role
-  }
-  return null
-}
-
-const getAppUserByEmail = async (email: string) => {
-  const { data, error } = await supabase.from('User').select('*').eq('email', email).maybeSingle()
-  if (error) {
-    throw error
-  }
-  return data
-}
-
-const ensureAppUser = async (params: {
-  email: string
-  role: UserRole
-  fullName?: string
-  city?: string
-  age?: number
-  displayName?: string
-}) => {
-  const existing = await getAppUserByEmail(params.email)
-  if (existing) {
-    return existing
-  }
-
-  const { data: created, error } = await supabase
-    .from('User')
-    .insert({
-      email: params.email,
-      passwordHash: 'supabase-auth',
-      role: roleInMap[params.role],
-    })
-    .select('*')
-    .single()
-
-  if (error || !created) {
-    throw error ?? new Error('Failed creating user')
-  }
-
-  if (params.role === 'worker') {
-    const { error: workerError } = await supabase.from('WorkerProfile').upsert(
-      {
-        userId: created.id,
-        fullName: params.fullName ?? params.email.split('@')[0],
-        age: params.age ?? 20,
-        city: params.city ?? 'תל אביב',
-        tags: ['נרשם דרך Supabase Auth'],
-      },
-      { onConflict: 'userId' },
-    )
-    if (workerError) {
-      throw workerError
-    }
-  }
-
-  if (params.role === 'employer') {
-    const { data: starterPlan } = await supabase
-      .from('EmployerPlan')
-      .select('id')
-      .eq('code', 'starter')
-      .maybeSingle()
-
-    const { error: employerError } = await supabase.from('EmployerProfile').upsert(
-      {
-        userId: created.id,
-        displayName: params.displayName ?? params.email.split('@')[0],
-        isVerified: false,
-        activePlanId: starterPlan?.id ?? null,
-      },
-      { onConflict: 'userId' },
-    )
-    if (employerError) {
-      throw employerError
-    }
-  }
-
-  return created
-}
-
-const requireAppUserFromSession = async () => {
+// The signed-in user's app id (the DB creates the app user on sign-up).
+const getAppUserId = async () => {
   const authUser = await getSessionUser()
-  const fallbackRole = extractRoleFromMeta(authUser.user_metadata as Record<string, unknown> | undefined) ?? 'worker'
-  try {
-    const appUser = await ensureAppUser({
-      email: authUser.email ?? '',
-      role: fallbackRole,
-    })
-    return appUser
-  } catch (error) {
-    if (!isAppDataAccessError(error)) {
-      throw error
-    }
-
-    return {
-      id: 0,
-      email: authUser.email ?? '',
-      role: roleInMap[fallbackRole],
-      isSuspended: false,
-    }
-  }
+  const { data, error } = await supabase.from('User').select('id').eq('authId', authUser.id).maybeSingle()
+  if (error) throw error
+  if (!data) throw new Error('החשבון עדיין לא הוגדר במערכת. נסו להתחבר מחדש.')
+  return data.id as number
 }
 
 export const api = {
@@ -311,161 +477,38 @@ export const api = {
   },
 
   onAuthStateChange: (handler: (user: AuthUser | null) => void) => {
-    const { data } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!session?.user) {
         handler(null)
         return
       }
-
-      try {
-        const user = await api.getCurrentUser()
-        handler(user)
-      } catch {
-        handler(null)
-      }
+      // Supabase warns against awaiting other auth calls inside this callback.
+      window.setTimeout(() => {
+        api.getCurrentUser().then(handler, () => handler(null))
+      }, 0)
     })
 
     return () => data.subscription.unsubscribe()
   },
 
-  getBootstrap: async (): Promise<BootstrapPayload> => {
-    const [
-      jobsResult,
-      workersResult,
-      applicationsResult,
-      plansResult,
-      usersResult,
-      employerProfilesResult,
-      preferencesResult,
-    ] = await Promise.all([
-      supabase.from('Job').select('*').order('createdAt', { ascending: false }),
-      supabase.from('WorkerProfile').select('*'),
-      supabase.from('Application').select('*').order('createdAt', { ascending: false }),
-      supabase.from('EmployerPlan').select('*').order('monthlyPrice', { ascending: true }),
-      supabase.from('User').select('id,email,isSuspended'),
-      supabase.from('EmployerProfile').select('userId,displayName'),
-      supabase.from('WorkerPreference').select('*').order('createdAt', { ascending: true }),
-    ])
-
-    if (jobsResult.error) throw jobsResult.error
-    if (workersResult.error) throw workersResult.error
-    if (applicationsResult.error) throw applicationsResult.error
-    if (plansResult.error) throw plansResult.error
-    if (usersResult.error) throw usersResult.error
-    if (employerProfilesResult.error) throw employerProfilesResult.error
-    if (preferencesResult.error) throw preferencesResult.error
-
-    const users = usersResult.data ?? []
-    const workers = workersResult.data ?? []
-    const employers = employerProfilesResult.data ?? []
-
-    const usersById = new Map(users.map((user) => [user.id, user]))
-    const employerByUserId = new Map(employers.map((profile) => [profile.userId, profile.displayName]))
-    const preferencesByWorkerId = new Map<number, WorkerPreference[]>()
-    for (const row of preferencesResult.data ?? []) {
-      const list = preferencesByWorkerId.get(row.workerId) ?? []
-      list.push(mapWorkerPreference(row))
-      preferencesByWorkerId.set(row.workerId, list)
-    }
-
-    const jobs = (jobsResult.data ?? []).map((job) => {
-      const employerUser = usersById.get(job.employerId)
-      const employerName = employerByUserId.get(job.employerId) ?? employerUser?.email ?? 'מעסיק'
-      return mapJob(job, employerName)
-    })
-
-    const mappedWorkers: WorkerProfile[] = workers.map((worker) => ({
-      id: worker.userId,
-      fullName: worker.fullName,
-      age: worker.age,
-      city: worker.city,
-      rating: toNumber(worker.rating, 0),
-      verificationLevel:
-        worker.verificationLevel === 'VERIFIED'
-          ? ('verified' as const)
-          : ('basic' as const),
-      tags: worker.tags ?? [],
-      isSuspended: usersById.get(worker.userId)?.isSuspended ?? false,
-      preferences: preferencesByWorkerId.get(worker.userId) ?? [],
-    }))
-
-    const plans = (plansResult.data ?? []).map((plan) => ({
-      id: plan.code as 'starter' | 'pro' | 'scale',
-      name: plan.name,
-      monthlyPrice: plan.monthlyPrice,
-      openingsLimit: plan.openingsLimit,
-      features: plan.features ?? [],
-    }))
-
-    const authUser = await getOptionalSessionUser()
-    let currentWorkerId: number | null = null
-    if (authUser?.email) {
-      const appUser = users.find((user) => user.email === authUser.email)
-      if (appUser && mappedWorkers.some((worker) => worker.id === appUser.id)) {
-        currentWorkerId = appUser.id
-      }
-    }
-
-    return {
-      jobs,
-      workers: mappedWorkers,
-      applications: (applicationsResult.data ?? []).map((application) => mapApplication(application)),
-      plans,
-      currentWorkerId: currentWorkerId ?? mappedWorkers[0]?.id ?? null,
-    }
-  },
-
   getCurrentUser: async (): Promise<AuthUser> => {
     const authUser = await getSessionUser()
-    const fallbackRole = extractRoleFromMeta(authUser.user_metadata as Record<string, unknown> | undefined) ?? 'worker'
-    const metadataFullName =
-      typeof authUser.user_metadata.fullName === 'string' ? authUser.user_metadata.fullName : undefined
-    const metadataDisplayName =
-      typeof authUser.user_metadata.displayName === 'string'
-        ? authUser.user_metadata.displayName
-        : undefined
-
-    let appUser: Awaited<ReturnType<typeof ensureAppUser>>
-    try {
-      appUser = await ensureAppUser({
-        email: authUser.email ?? '',
-        role: fallbackRole,
-        fullName: metadataFullName,
-        displayName: metadataDisplayName,
-        city: typeof authUser.user_metadata.city === 'string' ? authUser.user_metadata.city : undefined,
-        age: typeof authUser.user_metadata.age === 'number' ? authUser.user_metadata.age : undefined,
-      })
-    } catch (error) {
-      if (!isAppDataAccessError(error)) {
-        throw error
-      }
-
-      return buildAuthUserFromSession({
-        email: authUser.email ?? '',
-        role: fallbackRole,
-        fullName: metadataFullName,
-        displayName: metadataDisplayName,
-      })
+    const { data: appUser, error } = await supabase.from('User').select('*').eq('authId', authUser.id).maybeSingle()
+    if (error) throw error
+    if (!appUser) {
+      throw new Error('החשבון עדיין לא הוגדר במערכת. נסו להתחבר מחדש.')
     }
 
     let fullName: string | null = null
     let displayName: string | null = null
 
     if (appUser.role === 'WORKER') {
-      const { data } = await supabase
-        .from('WorkerProfile')
-        .select('fullName')
-        .eq('userId', appUser.id)
-        .maybeSingle()
+      const { data } = await supabase.from('WorkerProfile').select('fullName').eq('userId', appUser.id).maybeSingle()
       fullName = data?.fullName ?? null
     }
 
     if (appUser.role === 'EMPLOYER') {
-      const { data } = await supabase
-        .from('EmployerProfile')
-        .select('displayName')
-        .eq('userId', appUser.id)
-        .maybeSingle()
+      const { data } = await supabase.from('EmployerProfile').select('displayName').eq('userId', appUser.id).maybeSingle()
       displayName = data?.displayName ?? null
     }
 
@@ -476,6 +519,8 @@ export const api = {
       fullName,
       displayName,
       isSuspended: appUser.isSuspended,
+      suspendedUntil: appUser.suspendedUntil,
+      suspensionReason: appUser.suspensionReason,
     }
   },
 
@@ -504,19 +549,9 @@ export const api = {
 
     if (error) throw error
 
-    let appUserId = 0
-    try {
-      const appUser = await ensureAppUser(payload)
-      appUserId = appUser.id
-    } catch (caughtError) {
-      if (!isAppDataAccessError(caughtError)) {
-        throw caughtError
-      }
-    }
-
     return {
       role: payload.role,
-      userId: appUserId,
+      userId: 0,
       requiresEmailConfirmation: !data.session,
     }
   },
@@ -526,27 +561,8 @@ export const api = {
     if (error || !data.user) {
       throw error ?? new Error('Login failed')
     }
-
-    const roleFromMeta = extractRoleFromMeta(data.user.user_metadata as Record<string, unknown> | undefined)
-    let appUserId = 0
-    let appRole = roleFromMeta ?? 'worker'
-    try {
-      const appUser = await ensureAppUser({
-        email: payload.email,
-        role: roleFromMeta ?? 'worker',
-      })
-      appUserId = appUser.id
-      appRole = roleOutMap[appUser.role as 'WORKER' | 'EMPLOYER' | 'ADMIN']
-    } catch (caughtError) {
-      if (!isAppDataAccessError(caughtError)) {
-        throw caughtError
-      }
-    }
-
-    return {
-      role: appRole,
-      userId: appUserId,
-    }
+    const user = await api.getCurrentUser()
+    return { role: user.role, userId: user.id }
   },
 
   logout: async (): Promise<void> => {
@@ -554,217 +570,100 @@ export const api = {
     if (error) throw error
   },
 
-  createApplication: async (payload: { jobId: number; workerId: number }): Promise<Application> => {
-    const appUser = await requireAppUserFromSession()
-    if (appUser.role !== 'WORKER' && appUser.role !== 'ADMIN') {
-      throw new Error('Forbidden')
-    }
-    if (appUser.role === 'WORKER' && appUser.id !== payload.workerId) {
-      throw new Error('Worker can apply only for self')
-    }
+  // Offer expiry, waitlist hand-off, reminders and suspensions also run on a
+  // server schedule; calling this keeps them prompt while the app is open.
+  processDueEvents: () => rpc<void>('process_due_events'),
 
-    const [{ data: existing, error: existingError }, { data: job, error: jobError }] = await Promise.all([
-      supabase
-        .from('Application')
-        .select('*')
-        .eq('jobId', payload.jobId)
-        .eq('workerId', payload.workerId)
-        .maybeSingle(),
-      supabase.from('Job').select('*').eq('id', payload.jobId).maybeSingle(),
+  // Reference data ------------------------------------------------------------
+
+  getCities: async (): Promise<City[]> => {
+    const { data, error } = await supabase.from('City').select('*').order('name')
+    if (error) throw error
+    return (data ?? []).map((row) => ({ ...row, region: fromDb(row.region) }))
+  },
+
+  getCategories: async (): Promise<JobCategory[]> => {
+    const { data, error } = await supabase.from('JobCategory').select('*').order('name')
+    if (error) throw error
+    return data ?? []
+  },
+
+  getPlans: async (): Promise<EmployerPlan[]> => {
+    const { data, error } = await supabase.from('EmployerPlan').select('*').order('monthlyPrice', { ascending: true })
+    if (error) throw error
+    return (data ?? []).map((plan) => ({
+      id: plan.code as EmployerPlan['id'],
+      dbId: plan.id,
+      name: plan.name,
+      monthlyPrice: plan.monthlyPrice,
+      openingsLimit: plan.openingsLimit,
+      features: plan.features ?? [],
+    }))
+  },
+
+  // Worker ----------------------------------------------------------------------
+
+  getWorkerProfile: async (userId: number): Promise<WorkerProfile> => {
+    const [profileResult, preferencesResult] = await Promise.all([
+      supabase.from('WorkerProfile').select('*').eq('userId', userId).single(),
+      supabase.from('WorkerPreference').select('*').eq('workerId', userId).order('createdAt', { ascending: true }),
     ])
-
-    if (existingError) throw existingError
-    if (jobError) throw jobError
-    if (!job) throw new Error('Job not found')
-
-    if (existing) {
-      return mapApplication(existing)
+    if (profileResult.error) throw profileResult.error
+    if (preferencesResult.error) throw preferencesResult.error
+    const row = profileResult.data
+    return {
+      id: row.userId,
+      fullName: row.fullName,
+      age: row.age,
+      city: row.city,
+      bio: row.bio,
+      lat: row.lat,
+      lng: row.lng,
+      locationLabel: row.locationLabel,
+      isAvailable: row.isAvailable,
+      availabilitySlots: (row.availabilitySlots as string[]).map((slot) => slot.toLowerCase()),
+      reliabilityScore: row.reliabilityScore,
+      completedStreak: row.completedStreak,
+      rating: toNumber(row.rating, 0),
+      ratingCount: row.ratingCount,
+      verificationLevel: row.verificationLevel === 'VERIFIED' ? 'verified' : 'basic',
+      tags: row.tags ?? [],
+      sponsoredUntil: row.sponsoredUntil,
+      preferences: (preferencesResult.data ?? []).map(mapWorkerPreference),
     }
-
-    const autoApproved = job.hourlyPay >= 60 && job.verifiedEmployer
-    const { data: created, error } = await supabase
-      .from('Application')
-      .insert({
-        jobId: payload.jobId,
-        workerId: payload.workerId,
-        state: autoApproved ? 'APPROVED' : 'PENDING',
-      })
-      .select('*')
-      .single()
-
-    if (error || !created) throw error ?? new Error('Application create failed')
-    return mapApplication(created)
   },
 
-  updateApplication: async (id: number, state: ApplicationState): Promise<Application> => {
-    const appUser = await requireAppUserFromSession()
-    if (appUser.role !== 'EMPLOYER' && appUser.role !== 'ADMIN') {
-      throw new Error('Forbidden')
-    }
-
-    const { data: target, error: targetError } = await supabase
-      .from('Application')
-      .select('*')
-      .eq('id', id)
-      .maybeSingle()
-    if (targetError) throw targetError
-    if (!target) throw new Error('Application not found')
-
-    if (appUser.role === 'EMPLOYER') {
-      const { data: job, error: jobError } = await supabase
-        .from('Job')
-        .select('employerId')
-        .eq('id', target.jobId)
-        .maybeSingle()
-      if (jobError) throw jobError
-      if (!job || job.employerId !== appUser.id) {
-        throw new Error('Forbidden')
-      }
-    }
-
-    const { data: updated, error } = await supabase
-      .from('Application')
-      .update({ state: appStateInMap[state] })
-      .eq('id', id)
-      .select('*')
-      .single()
-
-    if (error || !updated) throw error ?? new Error('Update failed')
-    return mapApplication(updated)
+  updateWorkerProfile: async (userId: number, update: WorkerProfileUpdate): Promise<void> => {
+    const { error } = await supabase.from('WorkerProfile').update(update).eq('userId', userId)
+    if (error) throw error
   },
 
-  cancelApplication: async (id: number, reason: string): Promise<Application> => {
-    const appUser = await requireAppUserFromSession()
-    const { data: target, error: targetError } = await supabase
-      .from('Application')
-      .select('*')
-      .eq('id', id)
-      .maybeSingle()
-
-    if (targetError) throw targetError
-    if (!target) throw new Error('Application not found')
-
-    const { data: job, error: jobError } = await supabase
-      .from('Job')
-      .select('employerId')
-      .eq('id', target.jobId)
-      .maybeSingle()
-    if (jobError) throw jobError
-    if (!job) throw new Error('Job not found')
-
-    const canCancel =
-      appUser.role === 'ADMIN' || target.workerId === appUser.id || (appUser.role === 'EMPLOYER' && job.employerId === appUser.id)
-
-    if (!canCancel) {
-      throw new Error('Forbidden')
-    }
-
-    const canceledBy = appUser.role === 'ADMIN' ? 'ADMIN' : appUser.role === 'EMPLOYER' ? 'EMPLOYER' : 'WORKER'
-    const penaltyPoints = canceledBy === 'WORKER' ? 5 : canceledBy === 'EMPLOYER' ? 3 : 0
-
-    const { data: updated, error } = await supabase
-      .from('Application')
-      .update({
-        state: 'REJECTED',
-        canceledAt: new Date().toISOString(),
-        canceledBy,
-        cancellationReason: reason,
-        penaltyPoints,
-      })
-      .eq('id', id)
-      .select('*')
-      .single()
-
-    if (error || !updated) throw error ?? new Error('Cancel failed')
-    return mapApplication(updated)
+  setAvailability: async (userId: number, isAvailable: boolean): Promise<void> => {
+    const { error } = await supabase.from('WorkerProfile').update({ isAvailable }).eq('userId', userId)
+    if (error) throw error
   },
 
-  reviewApplication: async (id: number, score: number, comment: string): Promise<{ id: number }> => {
-    const appUser = await requireAppUserFromSession()
-
-    const { data: target, error: targetError } = await supabase
-      .from('Application')
-      .select('*')
-      .eq('id', id)
-      .maybeSingle()
-    if (targetError) throw targetError
-    if (!target || target.state !== 'APPROVED') {
-      throw new Error('Only approved matches can be reviewed')
-    }
-
-    const isWorkerOwner = appUser.id === target.workerId
-
-    if (!isWorkerOwner) {
-      const { data: job, error: jobError } = await supabase
-        .from('Job')
-        .select('employerId')
-        .eq('id', target.jobId)
-        .maybeSingle()
-      if (jobError) throw jobError
-      if (!job || (appUser.role !== 'ADMIN' && job.employerId !== appUser.id)) {
-        throw new Error('Forbidden')
-      }
-    }
-
-    const { data: review, error } = await supabase
-      .from('ApplicationReview')
-      .upsert(
-        {
-          applicationId: id,
-          reviewerId: appUser.id,
-          score,
-          comment: comment || null,
-        },
-        { onConflict: 'applicationId,reviewerId' },
-      )
-      .select('id')
-      .single()
-
-    if (error || !review) throw error ?? new Error('Review failed')
-
-    if (!isWorkerOwner) {
-      const { data: workerApps, error: workerAppsError } = await supabase
-        .from('Application')
-        .select('id')
-        .eq('workerId', target.workerId)
-      if (workerAppsError) throw workerAppsError
-
-      const ids = (workerApps ?? []).map((entry) => entry.id)
-      if (ids.length > 0) {
-        const { data: reviews, error: reviewsError } = await supabase
-          .from('ApplicationReview')
-          .select('score')
-          .in('applicationId', ids)
-        if (reviewsError) throw reviewsError
-
-        const ratings = (reviews ?? []).map((entry) => toNumber(entry.score, 0)).filter((value) => value > 0)
-        const average = ratings.length > 0 ? ratings.reduce((sum, value) => sum + value, 0) / ratings.length : 0
-
-        const { error: ratingError } = await supabase
-          .from('WorkerProfile')
-          .update({ rating: Number(average.toFixed(2)) })
-          .eq('userId', target.workerId)
-        if (ratingError) throw ratingError
-      }
-    }
-
-    return { id: review.id }
+  setAvailabilitySlots: async (userId: number, slots: string[]): Promise<void> => {
+    const { error } = await supabase
+      .from('WorkerProfile')
+      .update({ availabilitySlots: slots.map((slot) => slot.toUpperCase()) })
+      .eq('userId', userId)
+    if (error) throw error
   },
 
   addWorkerPreference: async (preference: WorkerPreferenceInput): Promise<WorkerPreference> => {
-    const appUser = await requireAppUserFromSession()
-    if (appUser.role !== 'WORKER') {
-      throw new Error('Forbidden')
-    }
-
+    const workerId = await getAppUserId()
     const { data: created, error } = await supabase
       .from('WorkerPreference')
       .insert({
-        workerId: appUser.id,
+        workerId,
         employmentType: employmentTypeInMap[preference.employmentType],
+        city: preference.city,
+        radiusKm: preference.radiusKm,
         minHourlyPay: preference.minHourlyPay,
-        preferredShifts: preference.preferredShifts.map((shift) => shiftInMap[shift]),
-        regions: preference.regions.map(regionIn),
+        minMonthlyPay: preference.employmentType === 'permanent' ? preference.minMonthlyPay : 0,
+        categories: preference.categories,
+        workloads: preference.employmentType === 'permanent' ? preference.workloads.map(toDb) : [],
         availableDates: preference.employmentType === 'temporary' ? preference.availableDates : [],
         transportOnly: preference.transportOnly,
       })
@@ -776,149 +675,306 @@ export const api = {
   },
 
   deleteWorkerPreference: async (id: number): Promise<void> => {
-    const appUser = await requireAppUserFromSession()
-    const { error } = await supabase.from('WorkerPreference').delete().eq('id', id).eq('workerId', appUser.id)
+    const { error } = await supabase.from('WorkerPreference').delete().eq('id', id)
     if (error) throw error
+  },
+
+  getJobFeed: async (): Promise<Job[]> => (await rpc<JobFeedRow[]>('job_feed')).map(mapJob),
+
+  swipeJob: (jobId: number, direction: SwipeDirection) =>
+    rpc<string>('swipe_job', { p_job_id: jobId, p_direction: toDb(direction) }).then((stage) => fromDb<ApplicationStage>(stage)),
+
+  getReliabilityEvents: async (userId: number): Promise<ReliabilityEvent[]> => {
+    const { data, error } = await supabase
+      .from('ReliabilityEvent')
+      .select('*')
+      .eq('workerId', userId)
+      .order('createdAt', { ascending: false })
+      .limit(30)
+    if (error) throw error
+    return (data ?? []).map((row) => ({ id: row.id, type: fromDb(row.type), delta: row.delta, createdAt: row.createdAt }))
+  },
+
+  getLicenses: async (userId: number): Promise<WorkerLicense[]> => {
+    const { data, error } = await supabase.from('WorkerLicense').select('*').eq('workerId', userId).order('createdAt')
+    if (error) throw error
+    return (data ?? []).map((row) => ({
+      id: row.id,
+      name: row.name,
+      expiresAt: row.expiresAt,
+      filePath: row.filePath,
+      isVerified: row.isVerified,
+    }))
+  },
+
+  addLicense: async (userId: number, license: { name: string; expiresAt: string | null; file: File | null }) => {
+    const filePath = license.file ? await uploadFile('worker-licenses', String(userId), license.file, 'pdf') : null
+    const { error } = await supabase
+      .from('WorkerLicense')
+      .insert({ workerId: userId, name: license.name, expiresAt: license.expiresAt, filePath })
+    if (error) throw error
+  },
+
+  deleteLicense: async (license: WorkerLicense): Promise<void> => {
+    const { error } = await supabase.from('WorkerLicense').delete().eq('id', license.id)
+    if (error) throw error
+    if (license.filePath) {
+      await supabase.storage.from('worker-licenses').remove([license.filePath])
+    }
+  },
+
+  getLicenseFileUrl: (path: string) => signedUrl('worker-licenses', path),
+
+  // Employer --------------------------------------------------------------------
+
+  getEmployerProfile: async (userId: number): Promise<EmployerProfile> => {
+    const { data, error } = await supabase.from('EmployerProfile').select('*').eq('userId', userId).single()
+    if (error) throw error
+    return mapEmployerProfile(data)
+  },
+
+  updateEmployerProfile: async (userId: number, update: EmployerProfileUpdate): Promise<void> => {
+    const { error } = await supabase
+      .from('EmployerProfile')
+      .update({ ...update, regions: update.regions.map(toDb), form101Url: update.form101Url || null })
+      .eq('userId', userId)
+    if (error) throw error
+  },
+
+  uploadCompanyMedia: (userId: number, file: File) => uploadFile('company-media', String(userId), file, 'jpg'),
+
+  requestBusinessVerification: (input: BusinessVerificationInput) =>
+    rpc<void>('request_business_verification', {
+      p_business_id: input.businessId,
+      p_legal_name: input.legalName,
+      p_address: input.businessAddress,
+      p_representative_name: input.representativeName,
+      p_representative_phone: input.representativePhone,
+    }),
+
+  selectPlan: (code: EmployerPlan['id']) =>
+    rpc<string>('select_plan', { p_plan_code: code }).then((status) => fromDb<SubscriptionStatus>(status)),
+
+  getEmployerPublicProfile: async (employerId: number): Promise<PublicEmployerProfile | null> => {
+    const rows = await rpc<Array<Pick<EmployerProfileRow, 'userId' | 'displayName' | 'description' | 'logoPath' | 'photoPaths' | 'regions' | 'isVerified' | 'ratingAvg' | 'ratingCount'> & { openJobs: number }>>(
+      'employer_public_profile',
+      { p_employer_id: employerId },
+    )
+    const row = rows[0]
+    if (!row) return null
+    return {
+      id: row.userId,
+      displayName: row.displayName,
+      description: row.description,
+      logoUrl: companyMediaUrl(row.logoPath),
+      photoUrls: row.photoPaths.map((path) => companyMediaUrl(path)!),
+      regions: row.regions.map((region) => fromDb(region)),
+      isVerified: row.isVerified,
+      ratingAvg: toNumberOrNull(row.ratingAvg),
+      ratingCount: row.ratingCount,
+      openJobs: row.openJobs,
+    }
+  },
+
+  getMyJobs: async (employerId: number): Promise<ManagedJob[]> => {
+    const { data, error } = await supabase
+      .from('Job')
+      .select('*')
+      .eq('employerId', employerId)
+      .order('createdAt', { ascending: false })
+    if (error) throw error
+    return (data ?? []).map(mapManagedJob)
   },
 
   createJob: async (payload: {
     title: string
     category: string
     city: string
-    region: Region
     employmentType: EmploymentType
     date: string
     shift: ShiftWindow
-    hourlyPay: number
+    payType: PayType
+    hourlyPay: number | null
+    monthlyPay: number | null
+    workload: Workload | null
+    requiredWorkers: number
+    description: string
     transportOffered: boolean
     transportFrom?: string
-  }): Promise<Job> => {
-    const appUser = await requireAppUserFromSession()
-    if (appUser.role !== 'EMPLOYER' && appUser.role !== 'ADMIN') {
-      throw new Error('Forbidden')
-    }
-
-    const employerId = appUser.id
-    if (appUser.role === 'EMPLOYER') {
-      const { data: profile, error: profileError } = await supabase
-        .from('EmployerProfile')
-        .select('activePlanId')
-        .eq('userId', employerId)
-        .maybeSingle()
-      if (profileError) throw profileError
-      if (!profile) throw new Error('Employer profile missing')
-
-      if (profile.activePlanId) {
-        const [{ data: plan, error: planError }, { count, error: countError }] = await Promise.all([
-          supabase
-            .from('EmployerPlan')
-            .select('openingsLimit')
-            .eq('id', profile.activePlanId)
-            .maybeSingle(),
-          supabase.from('Job').select('*', { count: 'exact', head: true }).eq('employerId', employerId),
-        ])
-
-        if (planError) throw planError
-        if (countError) throw countError
-        if (plan && (count ?? 0) >= plan.openingsLimit) {
-          throw new Error('Plan limit reached')
-        }
-      }
-    }
-
-    const { data: created, error } = await supabase
-      .from('Job')
-      .insert({
-        title: payload.title,
-        category: payload.category,
-        city: payload.city,
-        region: regionIn(payload.region),
-        employmentType: employmentTypeInMap[payload.employmentType],
-        date: new Date(payload.date).toISOString(),
-        shift: shiftInMap[payload.shift],
-        hourlyPay: payload.hourlyPay,
-        description: 'משרה חדשה שנוצרה על ידי המעסיק דרך Supabase.',
-        transportOffered: payload.transportOffered,
-        transportFrom: payload.transportFrom ?? null,
-        verifiedEmployer: true,
-        employerId,
-      })
-      .select('*')
-      .single()
-
-    if (error || !created) throw error ?? new Error('Create job failed')
-
-    const { data: employerProfile } = await supabase
-      .from('EmployerProfile')
-      .select('displayName')
-      .eq('userId', employerId)
-      .maybeSingle()
-
-    return mapJob(created, employerProfile?.displayName ?? appUser.email)
+  }): Promise<ManagedJob> => {
+    const created = await rpc<ManagedJobRow>('create_job', {
+      p_title: payload.title,
+      p_category: payload.category,
+      p_city: payload.city,
+      p_employment_type: employmentTypeInMap[payload.employmentType],
+      p_date: payload.date,
+      p_shift: shiftInMap[payload.shift],
+      p_pay_type: toDb(payload.payType),
+      p_hourly_pay: payload.hourlyPay,
+      p_monthly_pay: payload.monthlyPay,
+      p_workload: payload.workload ? toDb(payload.workload) : null,
+      p_required_workers: payload.requiredWorkers,
+      p_description: payload.description,
+      p_transport_offered: payload.transportOffered,
+      p_transport_from: payload.transportFrom ?? null,
+    })
+    return mapManagedJob(created)
   },
+
+  closeJob: (jobId: number) => rpc<void>('close_job', { p_job_id: jobId }),
+
+  getCandidates: async (jobId: number): Promise<Candidate[]> => {
+    const rows = await rpc<Array<Omit<Candidate, 'rating' | 'distanceKm'> & { rating: number | null; distanceKm: number | null }>>(
+      'candidate_feed',
+      { p_job_id: jobId },
+    )
+    return rows.map((row) => ({ ...row, rating: toNumber(row.rating, 0), distanceKm: toNumberOrNull(row.distanceKm) }))
+  },
+
+  swipeCandidate: (jobId: number, workerId: number, direction: SwipeDirection) =>
+    rpc<string>('swipe_candidate', { p_job_id: jobId, p_worker_id: workerId, p_direction: toDb(direction) }).then(
+      (stage) => fromDb<ApplicationStage>(stage),
+    ),
+
+  rehireWorker: (workerId: number, jobId: number) => rpc<number>('rehire_worker', { p_worker_id: workerId, p_job_id: jobId }),
+
+  sendJobOffer: (offer: JobOfferInput) =>
+    rpc<number>('send_job_offer', {
+      p_application_id: offer.applicationId,
+      p_starts_at: offer.startsAt,
+      p_ends_at: offer.endsAt,
+      p_address: offer.address,
+      p_pay_type: toDb(offer.payType),
+      p_pay_amount: offer.payAmount,
+      p_conditions: offer.conditions,
+      p_response_minutes: offer.responseMinutes,
+    }),
+
+  cancelJobOffer: (offerId: number) => rpc<void>('cancel_job_offer', { p_offer_id: offerId }),
+
+  completeShift: (applicationId: number, outcome: 'completed' | 'late' | 'no_show') =>
+    rpc<void>('complete_shift', { p_application_id: applicationId, p_outcome: toDb(outcome) }),
+
+  recordPayment: (applicationId: number, amount: number) =>
+    rpc<void>('record_payment', { p_application_id: applicationId, p_amount: amount }),
 
   sendDocuments: async (payload: { jobId: number; documentUrl: string }): Promise<{ message: string }> => {
-    const appUser = await requireAppUserFromSession()
-    if (appUser.role !== 'EMPLOYER' && appUser.role !== 'ADMIN') {
-      throw new Error('Forbidden')
-    }
+    const count = await rpc<number>('send_documents', { p_job_id: payload.jobId, p_document_url: payload.documentUrl })
+    return { message: `קישור נשלח ל-${count} עובדים` }
+  },
 
-    const { data: job, error: jobError } = await supabase.from('Job').select('*').eq('id', payload.jobId).maybeSingle()
-    if (jobError) throw jobError
-    if (!job) throw new Error('Job not found')
+  requestSponsorship: (jobId: number | null, days: number) =>
+    rpc<number>('request_sponsorship', { p_job_id: jobId, p_days: days }),
 
-    if (appUser.role === 'EMPLOYER' && job.employerId !== appUser.id) {
-      throw new Error('Forbidden')
-    }
+  // Both sides --------------------------------------------------------------------
 
-    const { data: approved, error: approvedError } = await supabase
-      .from('Application')
-      .select('workerId')
-      .eq('jobId', payload.jobId)
-      .eq('state', 'APPROVED')
-    if (approvedError) throw approvedError
+  getMyApplications: async (): Promise<Application[]> =>
+    (await rpc<ApplicationRow[]>('my_applications')).map(mapApplication),
 
-    if (!approved || approved.length === 0) {
-      throw new Error('Documents can be sent only after approved matches exist')
-    }
+  respondJobOffer: (offerId: number, accept: boolean) =>
+    rpc<string>('respond_job_offer', { p_offer_id: offerId, p_accept: accept }).then((stage) => fromDb<ApplicationStage>(stage)),
 
-    const recipients = approved.map((entry) => entry.workerId)
-    const { error } = await supabase.from('DocumentDispatch').insert({
-      jobId: payload.jobId,
-      documentUrl: payload.documentUrl,
-      recipients,
-    })
+  cancelHire: (applicationId: number, reason: string) =>
+    rpc<void>('cancel_hire', { p_application_id: applicationId, p_reason: reason }),
+
+  submitReview: (
+    applicationId: number,
+    review: { score?: number; payment?: number; environment?: number; clarity?: number; comment: string },
+  ) =>
+    rpc<void>('submit_review', {
+      p_application_id: applicationId,
+      p_score: review.score ?? null,
+      p_payment: review.payment ?? null,
+      p_environment: review.environment ?? null,
+      p_clarity: review.clarity ?? null,
+      p_comment: review.comment,
+    }),
+
+  getMessages: async (applicationId: number): Promise<ChatMessage[]> => {
+    const { data, error } = await supabase
+      .from('ChatMessage')
+      .select('*')
+      .eq('applicationId', applicationId)
+      .order('createdAt', { ascending: true })
     if (error) throw error
-
-    return { message: `קישור נשלח ל-${recipients.length} עובדים` }
+    return (data ?? []).map(mapChatMessage)
   },
 
-  getAdminOverview: async (): Promise<AdminOverview> => {
-    const [users, jobs, apps, pendingWorkers, pendingEmployers, suspendedUsers] = await Promise.all([
-      supabase.from('User').select('*', { count: 'exact', head: true }),
-      supabase.from('Job').select('*', { count: 'exact', head: true }),
-      supabase.from('Application').select('*', { count: 'exact', head: true }),
-      supabase.from('WorkerProfile').select('*', { count: 'exact', head: true }).eq('verificationLevel', 'BASIC'),
-      supabase.from('EmployerProfile').select('*', { count: 'exact', head: true }).eq('isVerified', false),
-      supabase.from('User').select('*', { count: 'exact', head: true }).eq('isSuspended', true),
-    ])
+  sendMessage: async (applicationId: number, body: string | null, audioPath: string | null = null) =>
+    mapChatMessage(
+      await rpc<ChatMessageRow>('send_chat_message', {
+        p_application_id: applicationId,
+        p_body: body,
+        p_audio_path: audioPath,
+      }),
+    ),
 
-    if (users.error) throw users.error
-    if (jobs.error) throw jobs.error
-    if (apps.error) throw apps.error
-    if (pendingWorkers.error) throw pendingWorkers.error
-    if (pendingEmployers.error) throw pendingEmployers.error
-    if (suspendedUsers.error) throw suspendedUsers.error
+  uploadVoiceMessage: (applicationId: number, audio: Blob) =>
+    uploadFile('chat-audio', String(applicationId), audio, 'webm'),
 
-    return {
-      usersCount: users.count ?? 0,
-      jobsCount: jobs.count ?? 0,
-      appsCount: apps.count ?? 0,
-      pendingWorkers: pendingWorkers.count ?? 0,
-      pendingEmployers: pendingEmployers.count ?? 0,
-      suspendedUsers: suspendedUsers.count ?? 0,
+  getAudioUrl: (path: string) => signedUrl('chat-audio', path),
+
+  subscribeToMessages: (applicationId: number, onMessage: (message: ChatMessage) => void) => {
+    const channel = supabase
+      .channel(`chat-${applicationId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'ChatMessage', filter: `applicationId=eq.${applicationId}` },
+        (payload) => onMessage(mapChatMessage(payload.new as ChatMessageRow)),
+      )
+      .subscribe()
+    return () => {
+      void supabase.removeChannel(channel)
     }
   },
+
+  getNotifications: async (): Promise<AppNotification[]> => {
+    const { data, error } = await supabase
+      .from('Notification')
+      .select('*')
+      .order('createdAt', { ascending: false })
+      .limit(50)
+    if (error) throw error
+    return (data ?? []).map(mapNotification)
+  },
+
+  markNotificationsRead: (ids: number[] | null) => rpc<void>('mark_notifications_read', { p_ids: ids }),
+
+  subscribeToNotifications: (userId: number, onChange: () => void) => {
+    const channel = supabase
+      .channel(`notifications-${userId}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'Notification', filter: `userId=eq.${userId}` }, onChange)
+      .subscribe()
+    return () => {
+      void supabase.removeChannel(channel)
+    }
+  },
+
+  reportUser: (payload: { reportedId: number; reason: string; details: string; applicationId?: number; messageId?: number }) =>
+    rpc<number>('report_user', {
+      p_reported_id: payload.reportedId,
+      p_reason: payload.reason,
+      p_details: payload.details,
+      p_application_id: payload.applicationId ?? null,
+      p_message_id: payload.messageId ?? null,
+    }),
+
+  blockUser: (userId: number) => rpc<void>('block_user', { p_blocked_id: userId }),
+
+  getBlockedUserIds: async (): Promise<number[]> => {
+    const { data, error } = await supabase.from('UserBlock').select('blockedId')
+    if (error) throw error
+    return (data ?? []).map((row) => row.blockedId)
+  },
+
+  unblockUser: async (userId: number): Promise<void> => {
+    const { error } = await supabase.from('UserBlock').delete().eq('blockedId', userId)
+    if (error) throw error
+  },
+
+  // Admin ---------------------------------------------------------------------------
+
+  getAdminOverview: () => rpc<AdminOverview>('admin_stats'),
 
   getAdminUsers: async (role?: UserRole): Promise<AdminUserRow[]> => {
     let usersQuery = supabase.from('User').select('*').order('createdAt', { ascending: false })
@@ -941,137 +997,153 @@ export const api = {
     const workerByUserId = new Map((workerProfilesResult.data ?? []).map((row) => [row.userId, row]))
     const employerByUserId = new Map((employerProfilesResult.data ?? []).map((row) => [row.userId, row]))
 
-    return (users ?? []).map((user) => ({
-      id: user.id,
-      email: user.email,
-      role: roleOutMap[user.role as 'WORKER' | 'EMPLOYER' | 'ADMIN'],
-      isSuspended: user.isSuspended,
-      suspensionReason: user.suspensionReason,
-      createdAt: user.createdAt,
-      worker: workerByUserId.get(user.id)
-        ? {
-            fullName: workerByUserId.get(user.id)!.fullName,
-            city: workerByUserId.get(user.id)!.city,
-            rating: toNumber(workerByUserId.get(user.id)!.rating, 0),
-            verificationLevel:
-              workerByUserId.get(user.id)!.verificationLevel === 'VERIFIED' ? 'verified' : 'basic',
-          }
-        : null,
-      employer: employerByUserId.get(user.id)
-        ? {
-            displayName: employerByUserId.get(user.id)!.displayName,
-            isVerified: employerByUserId.get(user.id)!.isVerified,
-          }
-        : null,
+    return (users ?? []).map((user) => {
+      const worker = workerByUserId.get(user.id)
+      const employer = employerByUserId.get(user.id)
+      return {
+        id: user.id,
+        email: user.email,
+        role: roleOutMap[user.role as 'WORKER' | 'EMPLOYER' | 'ADMIN'],
+        isSuspended: user.isSuspended,
+        suspendedUntil: user.suspendedUntil,
+        suspensionReason: user.suspensionReason,
+        contactViolations: user.contactViolations,
+        createdAt: user.createdAt,
+        worker: worker
+          ? {
+              fullName: worker.fullName,
+              city: worker.city,
+              rating: toNumber(worker.rating, 0),
+              reliabilityScore: worker.reliabilityScore,
+              verificationLevel: worker.verificationLevel === 'VERIFIED' ? 'verified' : 'basic',
+            }
+          : null,
+        employer: employer
+          ? {
+              displayName: employer.displayName,
+              isVerified: employer.isVerified,
+              businessId: employer.businessId,
+              legalName: employer.legalName,
+              businessAddress: employer.businessAddress,
+              representativeName: employer.representativeName,
+              representativePhone: employer.representativePhone,
+              verificationRequestedAt: employer.verificationRequestedAt,
+              verificationNote: employer.verificationNote,
+              subscriptionStatus: fromDb<SubscriptionStatus>(employer.subscriptionStatus),
+              trialEndsAt: employer.trialEndsAt,
+              activePlanId: employer.activePlanId,
+              ratingAvg: toNumberOrNull(employer.ratingAvg),
+              ratingCount: employer.ratingCount,
+            }
+          : null,
+      }
+    })
+  },
+
+  setUserSuspension: (id: number, isSuspended: boolean, reason?: string, days?: number) =>
+    rpc<void>('admin_set_suspension', {
+      p_user_id: id,
+      p_suspended: isSuspended,
+      p_reason: reason ?? null,
+      p_days: days ?? null,
+    }),
+
+  verifyWorker: (userId: number, level: 'basic' | 'verified') =>
+    rpc<void>('admin_verify_worker', { p_user_id: userId, p_level: toDb(level) }),
+
+  verifyEmployer: (userId: number, approve: boolean, note?: string) =>
+    rpc<void>('admin_decide_verification', { p_user_id: userId, p_approve: approve, p_note: note ?? null }),
+
+  getContactViolations: async (): Promise<ContactViolationRow[]> => {
+    const { data, error } = await supabase
+      .from('ContactViolation')
+      .select('*, user:User(email)')
+      .order('createdAt', { ascending: false })
+      .limit(100)
+    if (error) throw error
+    return (data ?? []).map((row) => ({
+      id: row.id,
+      userId: row.userId,
+      email: row.user?.email ?? '',
+      source: row.source,
+      originalText: row.originalText,
+      createdAt: row.createdAt,
     }))
   },
 
-  getTrustReport: async (): Promise<{ rows: TrustReportRow[] }> => {
-    const [usersResult, appsResult, jobsResult] = await Promise.all([
-      supabase.from('User').select('id,email,role,isSuspended,suspensionReason').in('role', ['WORKER', 'EMPLOYER']),
-      supabase.from('Application').select('workerId,jobId,penaltyPoints,canceledBy'),
-      supabase.from('Job').select('id,employerId'),
-    ])
-
-    if (usersResult.error) throw usersResult.error
-    if (appsResult.error) throw appsResult.error
-    if (jobsResult.error) throw jobsResult.error
-
-    const users = usersResult.data ?? []
-    const apps = appsResult.data ?? []
-    const jobs = jobsResult.data ?? []
-
-    const jobEmployerMap = new Map(jobs.map((job) => [job.id, job.employerId]))
-    const workerPenalties = new Map<number, number>()
-    const employerPenalties = new Map<number, number>()
-
-    for (const app of apps) {
-      if (!app.penaltyPoints || app.penaltyPoints <= 0 || !app.canceledBy) {
-        continue
-      }
-      if (app.canceledBy === 'WORKER') {
-        workerPenalties.set(app.workerId, (workerPenalties.get(app.workerId) ?? 0) + app.penaltyPoints)
-      }
-      if (app.canceledBy === 'EMPLOYER') {
-        const employerId = jobEmployerMap.get(app.jobId)
-        if (employerId) {
-          employerPenalties.set(employerId, (employerPenalties.get(employerId) ?? 0) + app.penaltyPoints)
-        }
-      }
-    }
-
-    const rows: TrustReportRow[] = users.map((user) => {
-      const role = roleOutMap[user.role as 'WORKER' | 'EMPLOYER' | 'ADMIN']
-      const totalPenalty =
-        role === 'worker' ? workerPenalties.get(user.id) ?? 0 : employerPenalties.get(user.id) ?? 0
-
-      return {
-        userId: user.id,
-        email: user.email,
-        role: role === 'worker' ? 'worker' : 'employer',
-        totalPenalty,
-        isSuspended: user.isSuspended,
-        suspensionReason: user.suspensionReason,
-      }
-    })
-
-    rows.sort((a, b) => b.totalPenalty - a.totalPenalty)
-    return { rows }
+  getReports: async (): Promise<UserReportRow[]> => {
+    const { data, error } = await supabase
+      .from('UserReport')
+      .select('*, reporter:User!UserReport_reporterId_fkey(email), reported:User!UserReport_reportedId_fkey(email)')
+      .order('createdAt', { ascending: false })
+      .limit(100)
+    if (error) throw error
+    return (data ?? []).map((row) => ({
+      id: row.id,
+      reporterEmail: row.reporter?.email ?? '',
+      reportedId: row.reportedId,
+      reportedEmail: row.reported?.email ?? '',
+      applicationId: row.applicationId,
+      messageId: row.messageId,
+      reason: row.reason,
+      details: row.details,
+      status: fromDb(row.status),
+      createdAt: row.createdAt,
+    }))
   },
 
-  recalculateSuspensions: async (): Promise<{ ok: boolean; workers: number; employers: number }> => {
-    const report = await api.getTrustReport()
-    const workerRows = report.rows.filter((row) => row.role === 'worker')
-    const employerRows = report.rows.filter((row) => row.role === 'employer')
+  resolveReport: (reportId: number, status: 'resolved' | 'dismissed', suspendReported: boolean) =>
+    rpc<void>('admin_resolve_report', { p_report_id: reportId, p_status: toDb(status), p_suspend_reported: suspendReported }),
 
-    const workerSuspended = workerRows.filter((row) => row.totalPenalty >= 20)
-    const employerSuspended = employerRows.filter((row) => row.totalPenalty >= 12)
+  deleteMessage: (messageId: number) => rpc<void>('admin_delete_message', { p_message_id: messageId }),
 
-    const updates = report.rows.map((row) => {
-      const shouldSuspend = row.role === 'worker' ? row.totalPenalty >= 20 : row.totalPenalty >= 12
-      return supabase
-        .from('User')
-        .update({
-          isSuspended: shouldSuspend,
-          suspendedAt: shouldSuspend ? new Date().toISOString() : null,
-          suspensionReason: shouldSuspend ? `Auto suspension: penalties=${row.totalPenalty}` : null,
-        })
-        .eq('id', row.userId)
-    })
-
-    await Promise.all(updates)
-
-    return {
-      ok: true,
-      workers: workerSuspended.length,
-      employers: employerSuspended.length,
-    }
+  getSponsorshipRequests: async (): Promise<SponsorshipRequestRow[]> => {
+    const { data, error } = await supabase
+      .from('SponsorshipRequest')
+      .select('*, requester:User(email), job:Job(title)')
+      .order('createdAt', { ascending: false })
+    if (error) throw error
+    return (data ?? []).map((row) => ({
+      id: row.id,
+      requesterEmail: row.requester?.email ?? '',
+      jobId: row.jobId,
+      jobTitle: row.job?.title ?? null,
+      days: row.days,
+      status: fromDb(row.status),
+      createdAt: row.createdAt,
+    }))
   },
 
-  setUserSuspension: async (id: number, isSuspended: boolean, reason?: string): Promise<void> => {
-    const { error } = await supabase
-      .from('User')
-      .update({
-        isSuspended,
-        suspendedAt: isSuspended ? new Date().toISOString() : null,
-        suspensionReason: isSuspended ? reason ?? 'Suspended by admin' : null,
-      })
-      .eq('id', id)
+  decideSponsorship: (requestId: number, approve: boolean) =>
+    rpc<void>('admin_decide_sponsorship', { p_request_id: requestId, p_approve: approve }),
 
+  setSubscription: (userId: number, status: SubscriptionStatus, trialDays?: number) =>
+    rpc<void>('admin_set_subscription', { p_user_id: userId, p_status: toDb(status), p_trial_days: trialDays ?? null }),
+
+  saveCategory: async (category: { id?: number; name: string; requiredLicense: string | null; isActive: boolean }) => {
+    const values = { name: category.name.trim(), requiredLicense: category.requiredLicense?.trim() || null, isActive: category.isActive }
+    const { error } = category.id
+      ? await supabase.from('JobCategory').update(values).eq('id', category.id)
+      : await supabase.from('JobCategory').insert(values)
     if (error) throw error
   },
 
-  verifyWorker: async (userId: number, level: 'basic' | 'verified'): Promise<void> => {
-    const { error } = await supabase
-      .from('WorkerProfile')
-      .update({ verificationLevel: level === 'verified' ? 'VERIFIED' : 'BASIC' })
-      .eq('userId', userId)
-
+  getPendingLicenses: async (): Promise<PendingLicenseRow[]> => {
+    const { data, error } = await supabase
+      .from('WorkerLicense')
+      .select('*, worker:User(email)')
+      .eq('isVerified', false)
+      .order('createdAt', { ascending: false })
     if (error) throw error
+    return (data ?? []).map((row) => ({
+      id: row.id,
+      workerEmail: row.worker?.email ?? '',
+      name: row.name,
+      expiresAt: row.expiresAt,
+      filePath: row.filePath,
+    }))
   },
 
-  verifyEmployer: async (userId: number, verified: boolean): Promise<void> => {
-    const { error } = await supabase.from('EmployerProfile').update({ isVerified: verified }).eq('userId', userId)
-    if (error) throw error
-  },
+  verifyLicense: (licenseId: number, verified: boolean) =>
+    rpc<void>('admin_verify_license', { p_license_id: licenseId, p_verified: verified }),
 }
