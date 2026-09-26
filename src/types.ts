@@ -1,10 +1,25 @@
 export type ShiftWindow = 'morning' | 'afternoon' | 'evening' | 'night'
 
+export type EmploymentType = 'temporary' | 'permanent'
+
+export type Region =
+  | 'north'
+  | 'haifa'
+  | 'sharon'
+  | 'center'
+  | 'tel_aviv'
+  | 'jerusalem'
+  | 'shfela'
+  | 'south'
+
 export type Job = {
   id: number
   title: string
   category: string
   city: string
+  region: Region | null
+  employmentType: EmploymentType
+  // For permanent jobs this is the start date.
   date: string
   shift: ShiftWindow
   hourlyPay: number
@@ -15,6 +30,21 @@ export type Job = {
   verifiedEmployer: boolean
 }
 
+// One saved search preference. A worker can have several; a job fits the worker
+// if it matches any of them. Empty arrays mean "no restriction".
+export type WorkerPreference = {
+  id: number
+  employmentType: EmploymentType
+  minHourlyPay: number
+  preferredShifts: ShiftWindow[]
+  regions: Region[]
+  // Only used when employmentType is 'temporary'.
+  availableDates: string[]
+  transportOnly: boolean
+}
+
+export type WorkerPreferenceInput = Omit<WorkerPreference, 'id'>
+
 export type WorkerProfile = {
   id: number
   fullName: string
@@ -24,6 +54,7 @@ export type WorkerProfile = {
   verificationLevel: 'basic' | 'verified'
   tags: string[]
   isSuspended?: boolean
+  preferences: WorkerPreference[]
 }
 
 export type ApplicationState = 'pending' | 'approved' | 'rejected'

@@ -380,7 +380,32 @@ button {
   font-weight: 700;
 }
 
-.pill.active-thread {
+button.pill {
+  cursor: pointer;
+}
+
+.choice-group {
+  display: grid;
+  gap: 6px;
+}
+
+.preferences-layout .saved-preferences {
+  grid-column: 1 / -1;
+}
+
+.preference-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.preference-cards p,
+.profile-layout .list-item p {
+  margin: 2px 0;
+}
+
+.pill.active-thread,
+.pill.selected {
   color: #fff;
   border-color: transparent;
   background: linear-gradient(125deg, var(--accent-1), var(--accent-2) 56%, var(--accent-3));

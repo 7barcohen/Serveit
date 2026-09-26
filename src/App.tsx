@@ -8,10 +8,14 @@ import type {
   ApplicationState,
   AuthUser,
   EmployerPlan,
+  EmploymentType,
   Job,
+  Region,
   ShiftWindow,
   TrustReportRow,
   UserRole,
+  WorkerPreference,
+  WorkerPreferenceInput,
   WorkerProfile,
 } from './types'
 
@@ -26,11 +30,86 @@ type AuthMode = 'login' | 'register'
 type WorkerTab = 'profile' | 'preferences' | 'jobs'
 type EmployerTab = 'publish' | 'chat' | 'events'
 
-type PersistedWorkerPreferences = {
-  minimumPay: number
-  preferredShift: 'all' | ShiftWindow
-  transportOnly: boolean
-  availabilityDates: string[]
+const employmentTypeLabels: Record<EmploymentType, string> = {
+  temporary: 'משרה זמנית',
+  permanent: 'משרה קבועה',
+}
+
+const regionLabels: Record<Region, string> = {
+  north: 'צפון',
+  haifa: 'חיפה והקריות',
+  sharon: 'שרון',
+  center: 'מרכז',
+  tel_aviv: 'תל אביב וגוש דן',
+  jerusalem: 'ירושלים והסביבה',
+  shfela: 'שפלה',
+  south: 'דרום',
+}
+
+const shiftOptions = Object.keys(shiftLabels) as ShiftWindow[]
+const regionOptions = Object.keys(regionLabels) as Region[]
+
+const emptyPreferenceForm: WorkerPreferenceInput = {
+  employmentType: 'temporary',
+  minHourlyPay: 35,
+  preferredShifts: [],
+  regions: [],
+  availableDates: [],
+  transportOnly: false,
+}
+
+const toggleValue = <T,>(list: T[], value: T): T[] =>
+  list.includes(value) ? list.filter((item) => item !== value) : [...list, value]
+
+const matchesPreference = (job: Job, preference: WorkerPreferenceInput) => {
+  if (job.employmentType !== preference.employmentType) {
+    return false
+  }
+  if (job.hourlyPay < preference.minHourlyPay) {
+    return false
+  }
+  if (preference.preferredShifts.length > 0 && !preference.preferredShifts.includes(job.shift)) {
+    return false
+  }
+  if (preference.regions.length > 0 && (!job.region || !preference.regions.includes(job.region))) {
+    return false
+  }
+  if (preference.transportOnly && !job.transportOffered) {
+    return false
+  }
+  // Dates only matter for one-off jobs; permanent jobs just have a start date.
+  if (job.employmentType === 'temporary' && !preference.availableDates.includes(job.date)) {
+    return false
+  }
+  return true
+}
+
+// 2026-09-15 -> 15/09
+const shortDate = (value: string) => value.split('-').reverse().slice(0, 2).join('/')
+
+function PreferenceSummary({ preference }: { preference: WorkerPreference }) {
+  return (
+    <div>
+      <strong>{employmentTypeLabels[preference.employmentType]}</strong>
+      <p>שכר מינימלי: {preference.minHourlyPay} ש"ח לשעה</p>
+      <p>
+        שעות:{' '}
+        {preference.preferredShifts.length > 0
+          ? preference.preferredShifts.map((shift) => shiftLabels[shift]).join(', ')
+          : 'כל השעות'}
+      </p>
+      <p>
+        אזור:{' '}
+        {preference.regions.length > 0
+          ? preference.regions.map((region) => regionLabels[region]).join(', ')
+          : 'כל הארץ'}
+      </p>
+      {preference.employmentType === 'temporary' && (
+        <p>תאריכים: {preference.availableDates.map(shortDate).join(', ')}</p>
+      )}
+      {preference.transportOnly && <p>רק עם הסעה או מימון נסיעה</p>}
+    </div>
+  )
 }
 
 type ChatMessage = {
@@ -54,48 +133,6 @@ type EmployerCandidateThread = {
   workerName: string
   jobTitle: string
   messages: ChatMessage[]
-}
-
-const workerPrefsStorageKey = 'serveit.worker.preferences.v1'
-
-const loadPersistedWorkerPreferences = (): PersistedWorkerPreferences => {
-  const defaults: PersistedWorkerPreferences = {
-    minimumPay: 50,
-    preferredShift: 'evening',
-    transportOnly: false,
-    availabilityDates: [],
-  }
-
-  if (typeof window === 'undefined') {
-    return defaults
-  }
-
-  try {
-    const raw = window.localStorage.getItem(workerPrefsStorageKey)
-    if (!raw) {
-      return defaults
-    }
-
-    const parsed = JSON.parse(raw) as Partial<PersistedWorkerPreferences>
-    return {
-      minimumPay: typeof parsed.minimumPay === 'number' ? parsed.minimumPay : defaults.minimumPay,
-      preferredShift:
-        parsed.preferredShift === 'all' ||
-        parsed.preferredShift === 'morning' ||
-        parsed.preferredShift === 'afternoon' ||
-        parsed.preferredShift === 'evening' ||
-        parsed.preferredShift === 'night'
-          ? parsed.preferredShift
-          : defaults.preferredShift,
-      transportOnly:
-        typeof parsed.transportOnly === 'boolean' ? parsed.transportOnly : defaults.transportOnly,
-      availabilityDates: Array.isArray(parsed.availabilityDates)
-        ? parsed.availabilityDates.filter((item): item is string => typeof item === 'string')
-        : defaults.availabilityDates,
-    }
-  } catch {
-    return defaults
-  }
 }
 
 const monthNames = [
@@ -123,8 +160,6 @@ const dateKey = (date: Date) => {
 }
 
 function App() {
-  const initialWorkerPreferences = useMemo(() => loadPersistedWorkerPreferences(), [])
-
   const [view, setView] = useState<'worker' | 'employer' | 'admin'>('worker')
   const [workerTab, setWorkerTab] = useState<WorkerTab>('jobs')
   const [designMood, setDesignMood] = useState<'sunset' | 'ocean'>('sunset')
@@ -144,14 +179,8 @@ function App() {
   })
   const [sessionUser, setSessionUser] = useState<AuthUser | null>(null)
 
-  const [minimumPay, setMinimumPay] = useState(initialWorkerPreferences.minimumPay)
-  const [preferredShift, setPreferredShift] = useState<'all' | ShiftWindow>(
-    initialWorkerPreferences.preferredShift,
-  )
-  const [transportOnly, setTransportOnly] = useState(initialWorkerPreferences.transportOnly)
-  const [availabilityDates, setAvailabilityDates] = useState<string[]>(
-    initialWorkerPreferences.availabilityDates,
-  )
+  const [preferenceForm, setPreferenceForm] = useState<WorkerPreferenceInput>(emptyPreferenceForm)
+  const [preferencesMessage, setPreferencesMessage] = useState('')
   const [calendarMonth, setCalendarMonth] = useState(() => {
     const current = new Date()
     return new Date(current.getFullYear(), current.getMonth(), 1)
@@ -196,6 +225,8 @@ function App() {
     title: '',
     category: 'אירועים',
     city: 'תל אביב',
+    region: 'tel_aviv' as Region,
+    employmentType: 'temporary' as EmploymentType,
     date: '2026-09-15',
     shift: 'evening' as ShiftWindow,
     hourlyPay: 60,
@@ -291,20 +322,6 @@ function App() {
   }, [view, sessionUser?.role])
 
   useEffect(() => {
-    if (typeof window === 'undefined') {
-      return
-    }
-
-    const payload: PersistedWorkerPreferences = {
-      minimumPay,
-      preferredShift,
-      transportOnly,
-      availabilityDates,
-    }
-    window.localStorage.setItem(workerPrefsStorageKey, JSON.stringify(payload))
-  }, [minimumPay, preferredShift, transportOnly, availabilityDates])
-
-  useEffect(() => {
     if (typeof window === 'undefined' || !sessionUser || sessionUser.role !== 'employer') {
       return
     }
@@ -347,23 +364,17 @@ function App() {
 
   const currentWorker = workers.find((worker) => worker.id === (sessionUser?.id ?? currentWorkerId))
 
+  const savedPreferences = useMemo(() => currentWorker?.preferences ?? [], [currentWorker])
+  const formIsTemporary = preferenceForm.employmentType === 'temporary'
+
+  // With no saved preferences the worker is open to everything; otherwise a job
+  // needs to match at least one of them.
   const filteredJobs = useMemo(() => {
-    return jobs.filter((job) => {
-      if (job.hourlyPay < minimumPay) {
-        return false
-      }
-      if (preferredShift !== 'all' && job.shift !== preferredShift) {
-        return false
-      }
-      if (transportOnly && !job.transportOffered) {
-        return false
-      }
-      if (availabilityDates.length > 0 && !availabilityDates.includes(job.date)) {
-        return false
-      }
-      return true
-    })
-  }, [jobs, minimumPay, preferredShift, transportOnly, availabilityDates])
+    if (savedPreferences.length === 0) {
+      return jobs
+    }
+    return jobs.filter((job) => savedPreferences.some((preference) => matchesPreference(job, preference)))
+  }, [jobs, savedPreferences])
 
   const effectiveCardIndex = cardsIndex > filteredJobs.length ? filteredJobs.length : cardsIndex
   const visibleCard = filteredJobs[effectiveCardIndex]
@@ -781,6 +792,8 @@ function App() {
         title: publishForm.title,
         category: publishForm.category,
         city: publishForm.city,
+        region: publishForm.region,
+        employmentType: publishForm.employmentType,
         date: publishForm.date,
         shift: publishForm.shift,
         hourlyPay: Number(publishForm.hourlyPay),
@@ -857,11 +870,53 @@ function App() {
     }
   }
 
+  const updatePreferenceForm = (patch: Partial<WorkerPreferenceInput>) => {
+    setPreferenceForm((previous) => ({ ...previous, ...patch }))
+    setPreferencesMessage('')
+  }
+
   const toggleAvailabilityDate = (selectedDate: Date) => {
-    const key = dateKey(selectedDate)
-    setAvailabilityDates((previous) =>
-      previous.includes(key) ? previous.filter((date) => date !== key) : [...previous, key],
+    updatePreferenceForm({
+      availableDates: toggleValue(preferenceForm.availableDates, dateKey(selectedDate)).sort(),
+    })
+  }
+
+  const setWorkerPreferences = (workerId: number, update: (previous: WorkerPreference[]) => WorkerPreference[]) => {
+    setWorkers((previous) =>
+      previous.map((worker) => (worker.id === workerId ? { ...worker, preferences: update(worker.preferences) } : worker)),
     )
+  }
+
+  const addWorkerPreference = async () => {
+    if (!currentWorker) {
+      setPreferencesMessage('לא נמצא פרופיל עובד לשמירה.')
+      return
+    }
+    if (formIsTemporary && preferenceForm.availableDates.length === 0) {
+      setPreferencesMessage('למשרה זמנית צריך לבחור לפחות תאריך אחד בלוח השנה.')
+      return
+    }
+
+    try {
+      const saved = await api.addWorkerPreference(preferenceForm)
+      setWorkerPreferences(currentWorker.id, (previous) => [...previous, saved])
+      setPreferenceForm(emptyPreferenceForm)
+      setPreferencesMessage('ההעדפה נשמרה. אפשר להוסיף עוד העדפות.')
+    } catch {
+      setError('שמירת ההעדפה נכשלה.')
+    }
+  }
+
+  const removeWorkerPreference = async (preferenceId: number) => {
+    if (!currentWorker) {
+      return
+    }
+    try {
+      await api.deleteWorkerPreference(preferenceId)
+      setWorkerPreferences(currentWorker.id, (previous) => previous.filter((item) => item.id !== preferenceId))
+    } catch {
+      setError('מחיקת ההעדפה נכשלה.')
+    }
   }
 
   const changeMonth = (direction: -1 | 1) => {
@@ -991,7 +1046,7 @@ function App() {
           <div className="pulse-stats">
             <span>{filteredJobs.length} משרות בפיד</span>
             <span>{applications.filter((item) => item.state === 'approved').length} מאצ׳ים פעילים</span>
-            <span>{availabilityDates.length} תאריכי זמינות</span>
+            <span>{savedPreferences.length} העדפות שמורות</span>
           </div>
         </div>
         <div className="role-toggle">
@@ -1089,6 +1144,18 @@ function App() {
                 <p>עיר: {currentWorker?.city ?? '—'}</p>
                 <p>דירוג: {currentWorker?.rating ?? '-'} / 5</p>
                 <p>אימות: {currentWorker?.verificationLevel === 'verified' ? 'מאומת' : 'בסיסי'}</p>
+                <h3>מה אני מחפש/ת</h3>
+                {savedPreferences.length === 0 ? (
+                  <p className="empty">פתוח/ה לכל המשרות. אפשר להוסיף העדפות בלשונית "העדפות".</p>
+                ) : (
+                  <div className="list">
+                    {savedPreferences.map((preference) => (
+                      <div key={preference.id} className="list-item">
+                        <PreferenceSummary preference={preference} />
+                      </div>
+                    ))}
+                  </div>
+                )}
               </article>
               <article className="card">
                 <h2>הפעילות שלי</h2>
@@ -1139,87 +1206,155 @@ function App() {
 
           {workerTab === 'preferences' && (
             <section className="panel worker-grid preferences-layout">
+              <article className="card saved-preferences">
+                <h2>ההעדפות השמורות שלי</h2>
+                {savedPreferences.length === 0 ? (
+                  <p className="empty">עדיין לא נשמרו העדפות, לכן מוצגות כל המשרות.</p>
+                ) : (
+                  <>
+                    <p className="empty">בפיד יופיעו משרות שמתאימות לאחת לפחות מההעדפות.</p>
+                    <div className="preference-cards">
+                      {savedPreferences.map((preference) => (
+                        <div key={preference.id} className="list-item">
+                          <PreferenceSummary preference={preference} />
+                          <button
+                            type="button"
+                            className="ghost"
+                            onClick={() => void removeWorkerPreference(preference.id)}
+                          >
+                            הסרה
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </article>
+
               <article className="card filters">
-                <h2>העדפות וחוקים אישיים</h2>
+                <h2>{savedPreferences.length === 0 ? 'הוספת העדפה' : 'הוספת העדפה נוספת'}</h2>
+                <div className="choice-group">
+                  <span>סוג משרה</span>
+                  <div className="pill-row">
+                    {(['temporary', 'permanent'] as const).map((type) => (
+                      <button
+                        key={type}
+                        type="button"
+                        className={`pill ${preferenceForm.employmentType === type ? 'selected' : ''}`}
+                        onClick={() => updatePreferenceForm({ employmentType: type })}
+                      >
+                        {employmentTypeLabels[type]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <label>
-                  שכר מינימלי לשעה: {minimumPay} ש"ח
+                  שכר מינימלי לשעה: {preferenceForm.minHourlyPay} ש"ח
                   <input
                     type="range"
                     min={35}
                     max={120}
                     step={1}
-                    value={minimumPay}
-                    onChange={(event) => setMinimumPay(Number(event.target.value))}
+                    value={preferenceForm.minHourlyPay}
+                    onChange={(event) => updatePreferenceForm({ minHourlyPay: Number(event.target.value) })}
                   />
                 </label>
-                <label>
-                  חלון שעות מועדף
-                  <select
-                    value={preferredShift}
-                    onChange={(event) => setPreferredShift(event.target.value as 'all' | ShiftWindow)}
-                  >
-                    <option value="all">הכל</option>
-                    <option value="morning">בוקר</option>
-                    <option value="afternoon">צהריים</option>
-                    <option value="evening">ערב</option>
-                    <option value="night">לילה</option>
-                  </select>
-                </label>
+                <div className="choice-group">
+                  <span>שעות עבודה (בלי בחירה = הכל)</span>
+                  <div className="pill-row">
+                    {shiftOptions.map((shift) => (
+                      <button
+                        key={shift}
+                        type="button"
+                        className={`pill ${preferenceForm.preferredShifts.includes(shift) ? 'selected' : ''}`}
+                        onClick={() =>
+                          updatePreferenceForm({ preferredShifts: toggleValue(preferenceForm.preferredShifts, shift) })
+                        }
+                      >
+                        {shiftLabels[shift]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="choice-group">
+                  <span>אזור (בלי בחירה = כל הארץ)</span>
+                  <div className="pill-row">
+                    {regionOptions.map((region) => (
+                      <button
+                        key={region}
+                        type="button"
+                        className={`pill ${preferenceForm.regions.includes(region) ? 'selected' : ''}`}
+                        onClick={() => updatePreferenceForm({ regions: toggleValue(preferenceForm.regions, region) })}
+                      >
+                        {regionLabels[region]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <label className="inline">
                   <input
                     type="checkbox"
-                    checked={transportOnly}
-                    onChange={(event) => setTransportOnly(event.target.checked)}
+                    checked={preferenceForm.transportOnly}
+                    onChange={(event) => updatePreferenceForm({ transportOnly: event.target.checked })}
                   />
                   רק משרות עם הסעה או מימון נסיעה
                 </label>
-                <p className="empty">סומנו {availabilityDates.length} תאריכים זמינים</p>
+                {formIsTemporary && (
+                  <p className="empty">סומנו {preferenceForm.availableDates.length} תאריכים בלוח השנה</p>
+                )}
+                <button type="button" className="primary" onClick={() => void addWorkerPreference()}>
+                  שמירת העדפה
+                </button>
+                {preferencesMessage && <p className="status-box">{preferencesMessage}</p>}
               </article>
 
-              <article className="card calendar-card">
-                <div className="calendar-head">
-                  <button type="button" className="ghost" onClick={() => changeMonth(-1)}>
-                    חודש קודם
-                  </button>
-                  <h2>
-                    {monthNames[calendarMonth.getMonth()]} {calendarMonth.getFullYear()}
-                  </h2>
-                  <button type="button" className="ghost" onClick={() => changeMonth(1)}>
-                    חודש הבא
-                  </button>
-                </div>
-                <div className="calendar-grid calendar-days-names">
-                  {dayNames.map((day) => (
-                    <span key={day}>{day}</span>
-                  ))}
-                </div>
-                <div className="calendar-grid calendar-days">
-                  {calendarDays.map((day, index) => {
-                    if (!day) {
-                      return <span key={`empty-${index}`} className="calendar-empty" />
-                    }
-                    const key = dateKey(day)
-                    const selected = availabilityDates.includes(key)
-                    return (
-                      <button
-                        key={key}
-                        type="button"
-                        className={`calendar-day ${selected ? 'selected' : ''}`}
-                        onClick={() => toggleAvailabilityDate(day)}
-                      >
-                        {day.getDate()}
-                      </button>
-                    )
-                  })}
-                </div>
-                <div className="pill-row">
-                  {availabilityDates.slice(0, 8).map((date) => (
-                    <span key={date} className="pill">
-                      {date}
-                    </span>
-                  ))}
-                </div>
-              </article>
+              {formIsTemporary && (
+                <article className="card calendar-card">
+                  <p className="empty">בחרו את התאריכים שבהם אתם זמינים למשרות זמניות.</p>
+                  <div className="calendar-head">
+                    <button type="button" className="ghost" onClick={() => changeMonth(-1)}>
+                      חודש קודם
+                    </button>
+                    <h2>
+                      {monthNames[calendarMonth.getMonth()]} {calendarMonth.getFullYear()}
+                    </h2>
+                    <button type="button" className="ghost" onClick={() => changeMonth(1)}>
+                      חודש הבא
+                    </button>
+                  </div>
+                  <div className="calendar-grid calendar-days-names">
+                    {dayNames.map((day) => (
+                      <span key={day}>{day}</span>
+                    ))}
+                  </div>
+                  <div className="calendar-grid calendar-days">
+                    {calendarDays.map((day, index) => {
+                      if (!day) {
+                        return <span key={`empty-${index}`} className="calendar-empty" />
+                      }
+                      const key = dateKey(day)
+                      const selected = preferenceForm.availableDates.includes(key)
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          className={`calendar-day ${selected ? 'selected' : ''}`}
+                          onClick={() => toggleAvailabilityDate(day)}
+                        >
+                          {day.getDate()}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <div className="pill-row">
+                    {preferenceForm.availableDates.slice(0, 8).map((date) => (
+                      <span key={date} className="pill">
+                        {date}
+                      </span>
+                    ))}
+                  </div>
+                </article>
+              )}
             </section>
           )}
 
@@ -1259,14 +1394,20 @@ function App() {
                       }}
                     >
                       <div className="pill-row">
+                        <span className="pill">{employmentTypeLabels[visibleCard.employmentType]}</span>
                         <span className="pill">{visibleCard.category}</span>
                         <span className="pill">{shiftLabels[visibleCard.shift]}</span>
-                        <span className="pill">{visibleCard.city}</span>
+                        <span className="pill">
+                          {visibleCard.city}
+                          {visibleCard.region ? ` · ${regionLabels[visibleCard.region]}` : ''}
+                        </span>
                       </div>
                       <h3>{visibleCard.title}</h3>
                       <p>{visibleCard.description}</p>
                       <ul>
-                        <li>תאריך: {visibleCard.date}</li>
+                        <li>
+                          {visibleCard.employmentType === 'permanent' ? 'תחילת עבודה' : 'תאריך'}: {visibleCard.date}
+                        </li>
                         <li>שכר: {visibleCard.hourlyPay} ש"ח לשעה</li>
                         <li>מעסיק: {visibleCard.employerName}</li>
                       </ul>
@@ -1442,6 +1583,21 @@ function App() {
                     <h2>פרסום משרה חדשה</h2>
                     <div className="form-grid">
                       <label>
+                        סוג משרה
+                        <select
+                          value={publishForm.employmentType}
+                          onChange={(event) =>
+                            setPublishForm((previous) => ({
+                              ...previous,
+                              employmentType: event.target.value as EmploymentType,
+                            }))
+                          }
+                        >
+                          <option value="temporary">{employmentTypeLabels.temporary}</option>
+                          <option value="permanent">{employmentTypeLabels.permanent}</option>
+                        </select>
+                      </label>
+                      <label>
                         כותרת
                         <input
                           value={publishForm.title}
@@ -1469,7 +1625,22 @@ function App() {
                         />
                       </label>
                       <label>
-                        תאריך
+                        אזור
+                        <select
+                          value={publishForm.region}
+                          onChange={(event) =>
+                            setPublishForm((previous) => ({ ...previous, region: event.target.value as Region }))
+                          }
+                        >
+                          {regionOptions.map((region) => (
+                            <option key={region} value={region}>
+                              {regionLabels[region]}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        {publishForm.employmentType === 'permanent' ? 'תאריך תחילת עבודה' : 'תאריך המשמרת'}
                         <input
                           type="date"
                           value={publishForm.date}
