@@ -6,10 +6,14 @@ import type {
   AuthResponse,
   AuthUser,
   BootstrapPayload,
+  EmploymentType,
   Job,
+  Region,
   ShiftWindow,
   TrustReportRow,
   UserRole,
+  WorkerPreference,
+  WorkerPreferenceInput,
   WorkerProfile,
 } from './types'
 import { supabase } from './lib/supabase'
@@ -52,10 +56,42 @@ const appStateInMap: Record<ApplicationState, 'PENDING' | 'APPROVED' | 'REJECTED
   rejected: 'REJECTED',
 }
 
+const employmentTypeOutMap: Record<'TEMPORARY' | 'PERMANENT', EmploymentType> = {
+  TEMPORARY: 'temporary',
+  PERMANENT: 'permanent',
+}
+
+const employmentTypeInMap: Record<EmploymentType, 'TEMPORARY' | 'PERMANENT'> = {
+  temporary: 'TEMPORARY',
+  permanent: 'PERMANENT',
+}
+
+// DB "Region" enum values are the upper-case form of the client values (TEL_AVIV <-> tel_aviv).
+const regionOut = (value: string) => value.toLowerCase() as Region
+const regionIn = (value: Region) => value.toUpperCase()
+
 const toNumber = (value: unknown, fallback = 0): number => {
   const parsed = typeof value === 'number' ? value : Number(value)
   return Number.isFinite(parsed) ? parsed : fallback
 }
+
+const mapWorkerPreference = (row: {
+  id: number
+  employmentType: 'TEMPORARY' | 'PERMANENT'
+  minHourlyPay: number
+  preferredShifts: Array<'MORNING' | 'AFTERNOON' | 'EVENING' | 'NIGHT'>
+  regions: string[]
+  availableDates: string[]
+  transportOnly: boolean
+}): WorkerPreference => ({
+  id: row.id,
+  employmentType: employmentTypeOutMap[row.employmentType],
+  minHourlyPay: row.minHourlyPay,
+  preferredShifts: row.preferredShifts.map((shift) => shiftOutMap[shift]),
+  regions: row.regions.map(regionOut),
+  availableDates: row.availableDates,
+  transportOnly: row.transportOnly,
+})
 
 const mapJob = (
   row: {
@@ -63,6 +99,8 @@ const mapJob = (
     title: string
     category: string
     city: string
+    region: string | null
+    employmentType: 'TEMPORARY' | 'PERMANENT'
     date: string
     shift: 'MORNING' | 'AFTERNOON' | 'EVENING' | 'NIGHT'
     hourlyPay: number
@@ -78,6 +116,8 @@ const mapJob = (
   title: row.title,
   category: row.category,
   city: row.city,
+  region: row.region ? regionOut(row.region) : null,
+  employmentType: employmentTypeOutMap[row.employmentType],
   date: new Date(row.date).toISOString().slice(0, 10),
   shift: shiftOutMap[row.shift],
   hourlyPay: row.hourlyPay,
@@ -289,15 +329,23 @@ export const api = {
   },
 
   getBootstrap: async (): Promise<BootstrapPayload> => {
-    const [jobsResult, workersResult, applicationsResult, plansResult, usersResult, employerProfilesResult] =
-      await Promise.all([
-        supabase.from('Job').select('*').order('createdAt', { ascending: false }),
-        supabase.from('WorkerProfile').select('*'),
-        supabase.from('Application').select('*').order('createdAt', { ascending: false }),
-        supabase.from('EmployerPlan').select('*').order('monthlyPrice', { ascending: true }),
-        supabase.from('User').select('id,email,isSuspended'),
-        supabase.from('EmployerProfile').select('userId,displayName'),
-      ])
+    const [
+      jobsResult,
+      workersResult,
+      applicationsResult,
+      plansResult,
+      usersResult,
+      employerProfilesResult,
+      preferencesResult,
+    ] = await Promise.all([
+      supabase.from('Job').select('*').order('createdAt', { ascending: false }),
+      supabase.from('WorkerProfile').select('*'),
+      supabase.from('Application').select('*').order('createdAt', { ascending: false }),
+      supabase.from('EmployerPlan').select('*').order('monthlyPrice', { ascending: true }),
+      supabase.from('User').select('id,email,isSuspended'),
+      supabase.from('EmployerProfile').select('userId,displayName'),
+      supabase.from('WorkerPreference').select('*').order('createdAt', { ascending: true }),
+    ])
 
     if (jobsResult.error) throw jobsResult.error
     if (workersResult.error) throw workersResult.error
@@ -305,6 +353,7 @@ export const api = {
     if (plansResult.error) throw plansResult.error
     if (usersResult.error) throw usersResult.error
     if (employerProfilesResult.error) throw employerProfilesResult.error
+    if (preferencesResult.error) throw preferencesResult.error
 
     const users = usersResult.data ?? []
     const workers = workersResult.data ?? []
@@ -312,6 +361,12 @@ export const api = {
 
     const usersById = new Map(users.map((user) => [user.id, user]))
     const employerByUserId = new Map(employers.map((profile) => [profile.userId, profile.displayName]))
+    const preferencesByWorkerId = new Map<number, WorkerPreference[]>()
+    for (const row of preferencesResult.data ?? []) {
+      const list = preferencesByWorkerId.get(row.workerId) ?? []
+      list.push(mapWorkerPreference(row))
+      preferencesByWorkerId.set(row.workerId, list)
+    }
 
     const jobs = (jobsResult.data ?? []).map((job) => {
       const employerUser = usersById.get(job.employerId)
@@ -331,6 +386,7 @@ export const api = {
           : ('basic' as const),
       tags: worker.tags ?? [],
       isSuspended: usersById.get(worker.userId)?.isSuspended ?? false,
+      preferences: preferencesByWorkerId.get(worker.userId) ?? [],
     }))
 
     const plans = (plansResult.data ?? []).map((plan) => ({
@@ -695,10 +751,42 @@ export const api = {
     return { id: review.id }
   },
 
+  addWorkerPreference: async (preference: WorkerPreferenceInput): Promise<WorkerPreference> => {
+    const appUser = await requireAppUserFromSession()
+    if (appUser.role !== 'WORKER') {
+      throw new Error('Forbidden')
+    }
+
+    const { data: created, error } = await supabase
+      .from('WorkerPreference')
+      .insert({
+        workerId: appUser.id,
+        employmentType: employmentTypeInMap[preference.employmentType],
+        minHourlyPay: preference.minHourlyPay,
+        preferredShifts: preference.preferredShifts.map((shift) => shiftInMap[shift]),
+        regions: preference.regions.map(regionIn),
+        availableDates: preference.employmentType === 'temporary' ? preference.availableDates : [],
+        transportOnly: preference.transportOnly,
+      })
+      .select('*')
+      .single()
+
+    if (error || !created) throw error ?? new Error('Create preference failed')
+    return mapWorkerPreference(created)
+  },
+
+  deleteWorkerPreference: async (id: number): Promise<void> => {
+    const appUser = await requireAppUserFromSession()
+    const { error } = await supabase.from('WorkerPreference').delete().eq('id', id).eq('workerId', appUser.id)
+    if (error) throw error
+  },
+
   createJob: async (payload: {
     title: string
     category: string
     city: string
+    region: Region
+    employmentType: EmploymentType
     date: string
     shift: ShiftWindow
     hourlyPay: number
@@ -744,6 +832,8 @@ export const api = {
         title: payload.title,
         category: payload.category,
         city: payload.city,
+        region: regionIn(payload.region),
+        employmentType: employmentTypeInMap[payload.employmentType],
         date: new Date(payload.date).toISOString(),
         shift: shiftInMap[payload.shift],
         hourlyPay: payload.hourlyPay,
