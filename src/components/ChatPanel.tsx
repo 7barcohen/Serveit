@@ -9,6 +9,7 @@ import { ShiftLinks } from './ShiftLinks'
 type Props = {
   role: 'worker' | 'employer'
   meId: number
+  defaultForm101Url?: string | null
   applications: Application[]
   selectedId: number | null
   onSelect: (applicationId: number) => void
@@ -38,7 +39,7 @@ function AudioMessage({ path }: { path: string }) {
 
 // Protected in-app chat (spec §3.1): opens on a match, masks contact details
 // on the server, supports voice messages, formal offers, reporting and blocking.
-export function ChatPanel({ role, meId, applications, selectedId, onSelect, onChanged }: Props) {
+export function ChatPanel({ role, meId, defaultForm101Url, applications, selectedId, onSelect, onChanged }: Props) {
   const threads = applications.filter((application) => application.matchedAt)
   const active = threads.find((thread) => thread.id === selectedId) ?? threads[0] ?? null
   const now = useNow(15000)
@@ -251,6 +252,7 @@ export function ChatPanel({ role, meId, applications, selectedId, onSelect, onCh
               </span>
               <span>{formatPay(offer.payType, offer.payAmount)}</span>
               {offer.conditions && <span>תנאים: {offer.conditions}</span>}
+              {offer.form101Url && <a href={offer.form101Url} target="_blank" rel="noreferrer">פתיחת טופס 101</a>}
               <span className="countdown">{formatTimeLeft(offer.expiresAt, now)}</span>
               {role === 'worker' ? (
                 <div className="fit-actions">
@@ -264,7 +266,7 @@ export function ChatPanel({ role, meId, applications, selectedId, onSelect, onCh
                         if (stage === 'waitlisted') {
                           throw new Error('המשרה התמלאה ברגע האחרון. נכנסת לרשימת ההמתנה.')
                         }
-                      }, 'ההצעה אושרה! נשלח אליך קישור לטופס 101.')
+                      }, offer.form101Url ? 'ההצעה אושרה! נשלח אליך קישור לטופס 101.' : 'ההצעה אושרה! לא צורף להצעה טופס 101.')
                     }
                   >
                     אישור ההצעה
@@ -295,6 +297,7 @@ export function ChatPanel({ role, meId, applications, selectedId, onSelect, onCh
             <div className="status-box">
               <strong>משמרת מאושרת: {formatDateTime(offer.startsAt)}</strong>
               <span>{offer.address}</span>
+              {role === 'worker' && offer.form101Url && <a href={offer.form101Url} target="_blank" rel="noreferrer">פתיחת טופס 101</a>}
               {role === 'worker' && <ShiftLinks application={active} />}
             </div>
           )}
@@ -307,6 +310,7 @@ export function ChatPanel({ role, meId, applications, selectedId, onSelect, onCh
           {role === 'employer' && showOfferForm && (
             <OfferForm
               application={active}
+              defaultForm101Url={defaultForm101Url}
               onCancel={() => setShowOfferForm(false)}
               onSent={() => {
                 setShowOfferForm(false)

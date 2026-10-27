@@ -243,6 +243,7 @@ export type JobOffer = {
   startsAt: string
   endsAt: string
   address: string
+  form101Url: string | null
   payType: OfferPayType
   payAmount: number
   conditions: string
@@ -255,6 +256,7 @@ export type JobOfferInput = {
   startsAt: string
   endsAt: string
   address: string
+  form101Url?: string | null
   payType: OfferPayType
   payAmount: number
   conditions: string

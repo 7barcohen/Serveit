@@ -210,7 +210,7 @@ export function CompanyProfile({ profile, plans, onChanged }: Props) {
             onChange={(event) => setPublicForm({ ...publicForm, form101Url: event.target.value })}
           />
         </label>
-        <p className="empty">נשלח אוטומטית לכל עובד/ת שמאשר/ת הצעת עבודה. חובה לפני שליחת הצעות.</p>
+        <p className="empty">הקישור יופיע כברירת מחדל בטופס הצעת עבודה, ואפשר לשנות או להסיר אותו בכל הצעה. הוספת טופס 101 אינה חובה.</p>
         <button type="button" className="primary" onClick={() => savePublic()} disabled={busy}>
           שמירה
         </button>

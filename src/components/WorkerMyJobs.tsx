@@ -124,18 +124,22 @@ export function WorkerMyJobs({ applications, onChanged, onOpenChat }: Props) {
         <article className="card full-row highlight">
           <h2>הצעות עבודה שממתינות לך</h2>
           <div className="list">
-            {offers.map((item) => item.offer && (
+            {offers.map((item) => {
+              const offer = item.offer
+              if (!offer) return null
+              return (
               <div key={item.id} className="list-item">
                 <strong>
-                  {item.offer.fromWaitlist ? 'תקן התפנה! ' : ''}
+                  {offer.fromWaitlist ? 'תקן התפנה! ' : ''}
                   {item.job.title} · {item.employer.name}
                 </strong>
                 <span>
-                  {formatDateTime(item.offer.startsAt)} · {item.offer.address}
+                  {formatDateTime(offer.startsAt)} · {offer.address}
                 </span>
-                <span>{formatPay(item.offer.payType, item.offer.payAmount)}</span>
-                {item.offer.conditions && <span>תנאים: {item.offer.conditions}</span>}
-                <span className="countdown">{formatTimeLeft(item.offer.expiresAt, now)}</span>
+                <span>{formatPay(offer.payType, offer.payAmount)}</span>
+                {offer.conditions && <span>תנאים: {offer.conditions}</span>}
+                {offer.form101Url && <a href={offer.form101Url} target="_blank" rel="noreferrer">פתיחת טופס 101</a>}
+                <span className="countdown">{formatTimeLeft(offer.expiresAt, now)}</span>
                 <div className="fit-actions">
                   <button
                     type="button"
@@ -143,9 +147,9 @@ export function WorkerMyJobs({ applications, onChanged, onOpenChat }: Props) {
                     disabled={busyId === item.id}
                     onClick={() =>
                       void run(item.id, async () => {
-                        const stage = await api.respondJobOffer(item.offer!.id, true)
+                        const stage = await api.respondJobOffer(offer.id, true)
                         if (stage === 'waitlisted') throw new Error('המשרה התמלאה ברגע האחרון. נכנסת לרשימת ההמתנה.')
-                      }, 'שובצת! קישור לטופס 101 נשלח בצ׳אט.')
+                      }, offer.form101Url ? 'שובצת! קישור לטופס 101 נשלח בצ׳אט.' : 'שובצת! להצעה זו לא צורף טופס 101.')
                     }
                   >
                     אישור
@@ -154,7 +158,7 @@ export function WorkerMyJobs({ applications, onChanged, onOpenChat }: Props) {
                     type="button"
                     className="ghost"
                     disabled={busyId === item.id}
-                    onClick={() => void run(item.id, () => api.respondJobOffer(item.offer!.id, false), 'ההצעה נדחתה.')}
+                    onClick={() => void run(item.id, () => api.respondJobOffer(offer.id, false), 'ההצעה נדחתה.')}
                   >
                     דחייה
                   </button>
@@ -163,7 +167,8 @@ export function WorkerMyJobs({ applications, onChanged, onOpenChat }: Props) {
                   </button>
                 </div>
               </div>
-            ))}
+              )
+            })}
           </div>
         </article>
       )}
@@ -185,6 +190,7 @@ export function WorkerMyJobs({ applications, onChanged, onOpenChat }: Props) {
                         {formatDateTime(item.offer.startsAt)}–{formatDateTime(item.offer.endsAt).split(' ').pop()} · {item.offer.address}
                       </span>
                       <span>{formatPay(item.offer.payType, item.offer.payAmount)}</span>
+                      {item.offer.form101Url && <a href={item.offer.form101Url} target="_blank" rel="noreferrer">פתיחת טופס 101</a>}
                     </>
                   )}
                   <ShiftLinks application={item} />

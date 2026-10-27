@@ -292,6 +292,7 @@ type ApplicationRow = {
   offerStartsAt: string | null
   offerEndsAt: string | null
   offerAddress: string | null
+  offerForm101Url: string | null
   offerPayType: string | null
   offerPayAmount: number | null
   offerConditions: string | null
@@ -351,6 +352,7 @@ const mapApplication = (row: ApplicationRow): Application => ({
         startsAt: row.offerStartsAt!,
         endsAt: row.offerEndsAt!,
         address: row.offerAddress!,
+        form101Url: row.offerForm101Url,
         payType: fromDb(row.offerPayType!),
         payAmount: row.offerPayAmount!,
         conditions: row.offerConditions ?? '',
@@ -844,6 +846,7 @@ export const api = {
       p_starts_at: offer.startsAt,
       p_ends_at: offer.endsAt,
       p_address: offer.address,
+      p_form101_url: offer.form101Url?.trim() || null,
       p_pay_type: toDb(offer.payType),
       p_pay_amount: offer.payAmount,
       p_conditions: offer.conditions,

@@ -677,6 +677,7 @@ function App() {
             <ChatPanel
               role="employer"
               meId={sessionUser.id}
+              defaultForm101Url={employerProfile?.form101Url}
               applications={applications}
               selectedId={selectedChatId}
               onSelect={setSelectedChatId}

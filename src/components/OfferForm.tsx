@@ -5,6 +5,7 @@ import type { Application, OfferPayType } from '../types'
 
 type Props = {
   application: Application
+  defaultForm101Url?: string | null
   onSent: () => void
   onCancel: () => void
 }
@@ -21,13 +22,14 @@ const defaultTimes = { morning: ['07:00', '15:00'], afternoon: ['12:00', '20:00'
 
 // Formal job offer (spec §3.2): exact date and hours, exact address, hourly or
 // global rate, special conditions and a response deadline.
-export function OfferForm({ application, onSent, onCancel }: Props) {
+export function OfferForm({ application, defaultForm101Url, onSent, onCancel }: Props) {
   const [startTime, endTime] = defaultTimes[application.job.shift]
   const [form, setForm] = useState({
     date: application.job.date,
     startTime,
     endTime,
     address: '',
+    form101Url: defaultForm101Url ?? '',
     payType: (application.job.payType === 'hourly' ? 'hourly' : 'global') as OfferPayType,
     payAmount: application.job.hourlyPay ?? application.job.monthlyPay ?? 0,
     conditions: '',
@@ -57,6 +59,10 @@ export function OfferForm({ application, onSent, onCancel }: Props) {
       setError('יש להזין תעריף.')
       return
     }
+    if (form.form101Url.trim() && !/^https:\/\/\S+$/i.test(form.form101Url.trim())) {
+      setError('קישור טופס 101 חייב להתחיל ב-https://, או להשאיר את השדה ריק.')
+      return
+    }
 
     setSending(true)
     setError('')
@@ -66,6 +72,7 @@ export function OfferForm({ application, onSent, onCancel }: Props) {
         startsAt: startsAt.toISOString(),
         endsAt: endsAt.toISOString(),
         address: form.address.trim(),
+        form101Url: form.form101Url.trim() || null,
         payType: form.payType,
         payAmount: form.payAmount,
         conditions: form.conditions.trim(),
@@ -104,6 +111,15 @@ export function OfferForm({ application, onSent, onCancel }: Props) {
           />
         </label>
         <label>
+          קישור לטופס 101 (לא חובה)
+          <input
+            type="url"
+            value={form.form101Url}
+            placeholder="https://..."
+            onChange={(event) => update({ form101Url: event.target.value })}
+          />
+        </label>
+        <label>
           סוג תעריף
           <select value={form.payType} onChange={(event) => update({ payType: event.target.value as OfferPayType })}>
             <option value="hourly">שעתי</option>
@@ -138,7 +154,7 @@ export function OfferForm({ application, onSent, onCancel }: Props) {
           />
         </label>
       </div>
-      <p className="empty">עם אישור העובד/ת יישלח אוטומטית קישור לטופס 101 שהוגדר בפרופיל החברה.</p>
+      <p className="empty">אם מצרפים קישור לטופס 101, הוא יישלח לעובד/ת רק לאחר אישור ההצעה. אפשר להשאיר ריק.</p>
       {error && <p className="error-text">{error}</p>}
       <div className="swipe-actions">
         <button type="button" className="primary" onClick={() => void submit()} disabled={sending}>
