@@ -37,6 +37,7 @@ export function CompanyProfile({ profile, plans, onChanged }: Props) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const [verificationFeedback, setVerificationFeedback] = useState<{ type: 'error' | 'success'; text: string } | null>(null)
 
   const run = async (action: () => Promise<unknown>, success: string) => {
     setBusy(true)
@@ -101,12 +102,40 @@ export function CompanyProfile({ profile, plans, onChanged }: Props) {
     }
   }
 
-  const submitVerification = () => {
+  const submitVerification = async () => {
+    setVerificationFeedback(null)
     if (!isValidIsraeliId(verification.businessId)) {
-      setError('מספר ח.פ. / עוסק מורשה אינו תקין.')
+      setVerificationFeedback({ type: 'error', text: 'מספר ח.פ. / עוסק מורשה אינו תקין.' })
       return
     }
-    void run(() => api.requestBusinessVerification(verification), 'פרטי העסק נשלחו לאימות. נעדכן בהתראה.')
+    if (verification.legalName.trim().length < 2) {
+      setVerificationFeedback({ type: 'error', text: 'יש להזין שם חברה רשמי (לפחות 2 תווים).' })
+      return
+    }
+    if (verification.businessAddress.trim().length < 5) {
+      setVerificationFeedback({ type: 'error', text: 'יש להזין כתובת פיזית מלאה.' })
+      return
+    }
+    if (verification.representativeName.trim().length < 2) {
+      setVerificationFeedback({ type: 'error', text: 'יש להזין שם נציג/ה מורשה.' })
+      return
+    }
+    const phone = verification.representativePhone.replace(/[\s-]/g, '')
+    if (!/^(\+972|0)\d{8,9}$/.test(phone)) {
+      setVerificationFeedback({ type: 'error', text: 'יש להזין מספר טלפון ישראלי תקין של הנציג/ה.' })
+      return
+    }
+
+    setBusy(true)
+    try {
+      await api.requestBusinessVerification({ ...verification, representativePhone: phone })
+      setVerificationFeedback({ type: 'success', text: 'פרטי העסק נשלחו לאימות. נעדכן בהתראה.' })
+      onChanged()
+    } catch (caught) {
+      setVerificationFeedback({ type: 'error', text: errorMessage(caught, 'שליחת פרטי העסק נכשלה.') })
+    } finally {
+      setBusy(false)
+    }
   }
 
   const verificationStatus = profile.isVerified
@@ -248,8 +277,13 @@ export function CompanyProfile({ profile, plans, onChanged }: Props) {
             onChange={(event) => setVerification({ ...verification, representativePhone: event.target.value })}
           />
         </label>
-        <button type="button" className="primary" onClick={submitVerification} disabled={busy}>
-          {profile.verificationRequestedAt || profile.isVerified ? 'עדכון ושליחה מחדש לאימות' : 'שליחה לאימות'}
+        {verificationFeedback && (
+          <p className={verificationFeedback.type === 'success' ? 'status-box' : 'error-text'} role={verificationFeedback.type === 'error' ? 'alert' : 'status'} aria-live="polite">
+            {verificationFeedback.text}
+          </p>
+        )}
+        <button type="button" className="primary" onClick={() => void submitVerification()} disabled={busy}>
+          {busy ? 'שולח לאימות…' : profile.verificationRequestedAt || profile.isVerified ? 'עדכון ושליחה מחדש לאימות' : 'שליחה לאימות'}
         </button>
       </article>
 
