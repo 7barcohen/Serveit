@@ -33,6 +33,7 @@ import type {
 type AuthMode = 'login' | 'register'
 type WorkerTab = 'jobs' | 'myjobs' | 'chat' | 'profile' | 'preferences'
 type EmployerTab = 'home' | 'candidates' | 'jobs' | 'chat' | 'history' | 'company'
+type EmployerMobileTab = Exclude<EmployerTab, 'history' | 'company'>
 
 const landingSeenKey = 'workaway.landingSeen'
 
@@ -68,12 +69,32 @@ const employerTabs: Array<[EmployerTab, string]> = [
   ['history', 'היסטוריה'],
   ['company', 'פרופיל חברה'],
 ]
+const employerMobileTabs: EmployerMobileTab[] = ['home', 'candidates', 'jobs', 'chat']
+
+const workerTabIcons: Record<WorkerTab, string> = {
+  jobs: 'M4 5.5h16v14H4z M8 3.5v4m8-4v4M4 9h16',
+  myjobs: 'M6 4h12a2 2 0 0 1 2 2v14l-8-4-8 4V6a2 2 0 0 1 2-2Z M9 8h6',
+  chat: 'M20 11.5a7.5 7.5 0 0 1-7.5 7.5H6l-3 2v-9.5A7.5 7.5 0 0 1 10.5 4H12a8 8 0 0 1 8 7.5Z M8 11h8m-8 3h5',
+  profile: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-8 9a8 8 0 0 1 16 0',
+  preferences: 'M4 7h9m4 0h3M4 17h3m4 0h9M13 4v6M7 14v6 M15 7a2 2 0 1 0 0 .01ZM9 17a2 2 0 1 0 0 .01Z',
+}
+
+const employerTabIcons: Record<EmployerMobileTab | 'more', string> = {
+  home: 'M3 11 12 4l9 7M5 10v10h14V10M9 20v-6h6v6',
+  candidates: 'M16 20v-1.5a4.5 4.5 0 0 0-4.5-4.5h-3A4.5 4.5 0 0 0 4 18.5V20m6-9a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm7-7.5a4 4 0 0 1 0 7.5m3 9v-1.5a4.5 4.5 0 0 0-3.5-4.4',
+  jobs: 'M4 5.5h16v14H4zM8 3.5v4m8-4v4M4 9h16',
+  chat: 'M20 11.5a7.5 7.5 0 0 1-7.5 7.5H6l-3 2v-9.5A7.5 7.5 0 0 1 10.5 4H12a8 8 0 0 1 8 7.5Z M8 11h8m-8 3h5',
+  more: 'M5 12h.01M12 12h.01M19 12h.01',
+}
 
 function App() {
   const now = useNow(60000)
   const [view, setView] = useState<'worker' | 'employer' | 'admin'>('worker')
   const [workerTab, setWorkerTab] = useState<WorkerTab>('jobs')
   const [employerTab, setEmployerTab] = useState<EmployerTab>('home')
+  const [employerMoreOpen, setEmployerMoreOpen] = useState(false)
+  const employerMoreRef = useRef<HTMLDivElement | null>(null)
+  const employerMoreButtonRef = useRef<HTMLButtonElement | null>(null)
   const [designMood, setDesignMood] = useState<'sunset' | 'ocean'>('sunset')
   const [loading, setLoading] = useState(false)
   const [authReady, setAuthReady] = useState(false)
@@ -82,6 +103,8 @@ function App() {
 
   const [authMode, setAuthMode] = useState<AuthMode>('login')
   const [authLoading, setAuthLoading] = useState(false)
+  const [authSuccess, setAuthSuccess] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [authForm, setAuthForm] = useState({
     email: '',
     password: '',
@@ -167,6 +190,24 @@ function App() {
     void loadReferenceData()
   }, [loadReferenceData])
 
+  useEffect(() => {
+    if (!employerMoreOpen) return
+    const closeOnPointerOutside = (event: PointerEvent) => {
+      if (!employerMoreRef.current?.contains(event.target as Node)) setEmployerMoreOpen(false)
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      setEmployerMoreOpen(false)
+      employerMoreButtonRef.current?.focus()
+    }
+    document.addEventListener('pointerdown', closeOnPointerOutside)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOnPointerOutside)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [employerMoreOpen])
+
   // Signs a user into the app shell once, whether the session came from a
   // page load, the auth listener or the login form.
   const enteredUserIdRef = useRef<number | null>(null)
@@ -231,6 +272,7 @@ function App() {
   const handleAuthSubmit = async () => {
     setAuthLoading(true)
     setError('')
+    setAuthSuccess('')
 
     try {
       if (authMode === 'login') {
@@ -262,7 +304,7 @@ function App() {
         })
 
         if (result.requiresEmailConfirmation) {
-          setError('ההרשמה נקלטה. צריך לאשר את כתובת האימייל במייל שנשלח ואז להתחבר.')
+          setAuthSuccess('ההרשמה נקלטה. אשרי את כתובת האימייל דרך המייל שנשלח ואז התחברי.')
           setAuthMode('login')
           return
         }
@@ -295,12 +337,16 @@ function App() {
 
   const openChat = (applicationId: number) => {
     setSelectedChatId(applicationId)
-    if (sessionUser?.role === 'employer') setEmployerTab('chat')
+    if (sessionUser?.role === 'employer') {
+      setEmployerTab('chat')
+      setEmployerMoreOpen(false)
+    }
     else setWorkerTab('chat')
   }
 
   const openNotification = (notification: AppNotification) => {
     void refreshAll()
+    setEmployerMoreOpen(false)
     const chatTypes = ['match', 'message', 'offer', 'offer_accepted', 'offer_declined', 'offer_expired', 'waitlist_offer', 'hired']
     if (notification.applicationId && chatTypes.includes(notification.type)) {
       openChat(notification.applicationId)
@@ -321,7 +367,7 @@ function App() {
     }
   }
 
-  const appClassName = `app ${designMood === 'ocean' ? 'theme-ocean' : ''}`
+  const appClassName = `app ${designMood === 'ocean' ? 'theme-ocean' : ''} ${sessionUser?.role === 'worker' ? 'worker-view-active' : ''} ${sessionUser?.role === 'worker' && workerTab === 'jobs' ? 'worker-job-feed-active' : ''} ${sessionUser?.role === 'employer' ? 'employer-view-active' : ''} ${sessionUser?.role === 'admin' ? 'admin-view-active' : ''}`
 
   if (!authReady) {
     return (
@@ -342,12 +388,16 @@ function App() {
               markLandingSeen()
               setShowLanding(false)
               setAuthMode('register')
+              setAuthSuccess('')
+              setError('')
               setAuthForm((prev) => ({ ...prev, role }))
             }}
             onLogin={() => {
               markLandingSeen()
               setShowLanding(false)
               setAuthMode('login')
+              setAuthSuccess('')
+              setError('')
             }}
           />
         </main>
@@ -357,7 +407,7 @@ function App() {
     return (
       <main className={appClassName} dir="rtl">
         <section className="card auth-card">
-          <p className="eyebrow">WorkAway</p>
+          <p className="eyebrow">ShiftTed</p>
           <h2>{authMode === 'login' ? 'כניסה' : 'הרשמה'}</h2>
           <p className="subtitle">נכנסים ומתחילים למצוא עבודה או לפרסם משרות.</p>
           <form
@@ -368,21 +418,31 @@ function App() {
           >
             <label>
               אימייל
-              <input
+                <input
                 type="email"
+                  required
                 autoComplete="email"
+                  aria-describedby={error ? 'auth-error' : undefined}
                 value={authForm.email}
                 onChange={(event) => setAuthForm((prev) => ({ ...prev, email: event.target.value }))}
               />
             </label>
             <label>
               סיסמה
-              <input
-                type="password"
-                autoComplete={authMode === 'login' ? 'current-password' : 'new-password'}
-                value={authForm.password}
-                onChange={(event) => setAuthForm((prev) => ({ ...prev, password: event.target.value }))}
-              />
+              <span className="password-input-wrap">
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  required
+                  minLength={authMode === 'register' ? 6 : undefined}
+                  autoComplete={authMode === 'login' ? 'current-password' : 'new-password'}
+                  aria-describedby={error ? 'auth-error' : undefined}
+                  value={authForm.password}
+                  onChange={(event) => setAuthForm((prev) => ({ ...prev, password: event.target.value }))}
+                />
+                <button type="button" className="password-visibility" aria-pressed={showPassword} onClick={() => setShowPassword((shown) => !shown)}>
+                  {showPassword ? 'הסתרה' : 'הצגה'}
+                </button>
+              </span>
             </label>
 
             {authMode === 'register' && (
@@ -407,6 +467,7 @@ function App() {
                     <label>
                       שם מלא
                       <input
+                        required
                         value={authForm.fullName}
                         onChange={(event) => setAuthForm((prev) => ({ ...prev, fullName: event.target.value }))}
                       />
@@ -414,6 +475,7 @@ function App() {
                     <label>
                       עיר
                       <select
+                        required
                         value={authForm.city}
                         onChange={(event) => setAuthForm((prev) => ({ ...prev, city: event.target.value }))}
                       >
@@ -429,6 +491,8 @@ function App() {
                         type="number"
                         min={16}
                         max={99}
+                        inputMode="numeric"
+                        required
                         value={authForm.age}
                         onChange={(event) => setAuthForm((prev) => ({ ...prev, age: Number(event.target.value) }))}
                       />
@@ -438,6 +502,7 @@ function App() {
                   <label>
                     שם עסק
                     <input
+                      required
                       value={authForm.displayName}
                       onChange={(event) => setAuthForm((prev) => ({ ...prev, displayName: event.target.value }))}
                     />
@@ -446,24 +511,29 @@ function App() {
               </>
             )}
 
-            <div className="swipe-actions">
+            {error && <p id="auth-error" className="error-text" role="alert" aria-live="assertive">{error}</p>}
+            {authSuccess && <p className="auth-success" role="status" aria-live="polite">{authSuccess}</p>}
+            <div className="swipe-actions auth-actions">
               <button type="submit" className="primary" disabled={authLoading}>
                 {authLoading ? 'טוען...' : authMode === 'login' ? 'התחבר' : 'צור חשבון'}
               </button>
               <button
                 type="button"
                 className="ghost"
-                onClick={() => setAuthMode((mode) => (mode === 'login' ? 'register' : 'login'))}
+                onClick={() => {
+                  setAuthMode((mode) => (mode === 'login' ? 'register' : 'login'))
+                  setError('')
+                  setAuthSuccess('')
+                }}
               >
                 {authMode === 'login' ? 'אין לי חשבון' : 'כבר יש לי חשבון'}
               </button>
               <button type="button" className="ghost" onClick={() => setShowLanding(true)}>
-                על WorkAway
+                על ShiftTed
               </button>
             </div>
           </form>
 
-          {error && <p className="error-text">{error}</p>}
         </section>
       </main>
     )
@@ -479,7 +549,7 @@ function App() {
     <main className={appClassName} dir="rtl">
       <header className="topbar">
         <div>
-          <p className="eyebrow">WorkAway</p>
+          <p className="eyebrow">ShiftTed</p>
           <h1>{sessionUser.role === 'employer' ? 'העובדים הנכונים, בזמן' : 'מוצאים עבודה לפי הווייב שלך'}</h1>
           <p className="subtitle">{sessionUser.fullName ?? sessionUser.displayName ?? sessionUser.email}</p>
           <div className="pulse-stats">
@@ -531,20 +601,22 @@ function App() {
 
       <section className="card quick-actions">
         <div className="swipe-actions quick-tools">
-          <div className="theme-switch" role="group" aria-label="Theme switcher">
+          <div className="theme-switch" role="group" aria-label="ערכת צבעים">
             <button
               type="button"
               className={designMood === 'sunset' ? 'active' : ''}
+              aria-pressed={designMood === 'sunset'}
               onClick={() => setDesignMood('sunset')}
             >
-              Sunset Pop
+              שקיעה
             </button>
             <button
               type="button"
               className={designMood === 'ocean' ? 'active' : ''}
+              aria-pressed={designMood === 'ocean'}
               onClick={() => setDesignMood('ocean')}
             >
-              Ocean Glow
+              אוקיינוס
             </button>
           </div>
           <button type="button" className="ghost" onClick={() => void refreshAll()} disabled={loading}>
@@ -566,24 +638,26 @@ function App() {
       )}
 
       {error && (
-        <section className="card">
+        <section className="card" role="alert" aria-live="assertive">
           <p className="error-text">{error}</p>
         </section>
       )}
 
       {view === 'worker' && sessionUser.role === 'worker' && (
         <section className="worker-shell">
-          <nav className="worker-dock">
+          <nav className="worker-dock worker-dock-bottom" aria-label="ניווט עובד">
             {workerTabs.map(([key, label]) => (
-              <button key={key} type="button" className={workerTab === key ? 'active' : ''} onClick={() => setWorkerTab(key)}>
-                {label}
-                {key === 'myjobs' && applications.some((item) => item.stage === 'offered') ? ' •' : ''}
+                <button key={key} type="button" className={workerTab === key ? 'active' : ''} aria-current={workerTab === key ? 'page' : undefined} onClick={() => setWorkerTab(key)}>
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d={workerTabIcons[key]} stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                <span>{label}{key === 'myjobs' && applications.some((item) => item.stage === 'offered') ? ' •' : ''}</span>
               </button>
             ))}
           </nav>
 
           {workerTab === 'jobs' && (
             <JobFeed
+              key={sessionUser.id}
+              userId={sessionUser.id}
               jobs={jobs}
               profile={workerProfile}
               cities={cities}
@@ -627,12 +701,36 @@ function App() {
 
       {view === 'employer' && sessionUser.role === 'employer' && employerProfile && (
         <section className="worker-shell">
-          <nav className="worker-dock">
+          <nav className="worker-dock employer-desktop-nav" aria-label="ניווט מעסיק">
             {employerTabs.map(([key, label]) => (
-              <button key={key} type="button" className={employerTab === key ? 'active' : ''} onClick={() => setEmployerTab(key)}>
+              <button key={key} type="button" className={employerTab === key ? 'active' : ''} aria-current={employerTab === key ? 'page' : undefined} onClick={() => setEmployerTab(key)}>
                 {label}
               </button>
             ))}
+          </nav>
+
+          <nav className="employer-mobile-nav" aria-label="ניווט מעסיק">
+            {employerMobileTabs.map((key) => {
+              const label = employerTabs.find(([tab]) => tab === key)?.[1] ?? key
+              return (
+                <button key={key} type="button" className={employerTab === key ? 'active' : ''} aria-current={employerTab === key ? 'page' : undefined} onClick={() => { setEmployerTab(key); setEmployerMoreOpen(false) }}>
+                  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d={employerTabIcons[key]} stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                  <span>{label}</span>
+                </button>
+              )
+            })}
+            <div className={`employer-more ${employerMoreOpen ? 'open' : ''}`} ref={employerMoreRef}>
+              <button ref={employerMoreButtonRef} type="button" className={employerTab === 'history' || employerTab === 'company' || employerMoreOpen ? 'active' : ''} aria-expanded={employerMoreOpen} aria-controls="employer-more-menu" onClick={() => setEmployerMoreOpen((open) => !open)}>
+                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d={employerTabIcons.more} stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" /></svg>
+                <span>עוד</span>
+              </button>
+              {employerMoreOpen && (
+                <div className="employer-more-menu" id="employer-more-menu" aria-label="עוד אזורים">
+                  <button type="button" aria-current={employerTab === 'history' ? 'page' : undefined} onClick={() => { setEmployerTab('history'); setEmployerMoreOpen(false); window.requestAnimationFrame(() => employerMoreButtonRef.current?.focus()) }}>היסטוריה</button>
+                  <button type="button" aria-current={employerTab === 'company' ? 'page' : undefined} onClick={() => { setEmployerTab('company'); setEmployerMoreOpen(false); window.requestAnimationFrame(() => employerMoreButtonRef.current?.focus()) }}>פרופיל חברה</button>
+                </div>
+              )}
+            </div>
           </nav>
 
           {employerTab === 'home' && (
@@ -708,7 +806,7 @@ function App() {
       )}
 
       <footer className="footer">
-        <span>WorkAway · פרטי קשר מוגנים בכל שלב</span>
+        <span>ShiftTed · פרטי קשר מוגנים בכל שלב</span>
         <span>שימוש חינמי לעובדים · חודשיים חינם למעסיקים חדשים</span>
       </footer>
     </main>

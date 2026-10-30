@@ -23,7 +23,8 @@ export function CandidateSwipe({ jobs, selectedJobId, onSelectJob, onMatched }: 
   const [dragX, setDragX] = useState(0)
   const [isDragging, setIsDragging] = useState(false)
   const [swipeExit, setSwipeExit] = useState<'left' | 'right' | null>(null)
-  const dragStartXRef = useRef<number | null>(null)
+  const dragStartRef = useRef<{ x: number; y: number; pointerId: number } | null>(null)
+  const dragLockedRef = useRef(false)
 
   const [reloadKey, setReloadKey] = useState(0)
 
@@ -77,22 +78,27 @@ export function CandidateSwipe({ jobs, selectedJobId, onSelectJob, onMatched }: 
           setNotice(`${candidate.firstName} נוסף/ה לרשימת ההתאמות הפוטנציאליות. אם גם הוא/היא יסמן/תסמן עניין, ייפתח צ׳אט.`)
         }
       }
-    } catch (caught) {
-      setError(errorMessage(caught, 'שמירת ההחלקה נכשלה.'))
-    } finally {
       window.setTimeout(() => {
         setCandidates((previous) => previous.filter((item) => item.workerId !== candidate.workerId))
         setDragX(0)
         setSwipeExit(null)
       }, 180)
+    } catch (caught) {
+      setError(errorMessage(caught, 'שמירת ההחלקה נכשלה.'))
+      setDragX(0)
+      setSwipeExit(null)
     }
   }
 
-  const endDrag = () => {
-    if (!isDragging) return
+  const finishDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    const start = dragStartRef.current
+    if (!start || event.pointerId !== start.pointerId) return
     setIsDragging(false)
-    if (dragX > 90) void swipe('right')
-    else if (dragX < -90) void swipe('left')
+    const deltaX = event.clientX - start.x
+    const shouldSwipe = dragLockedRef.current && Math.abs(deltaX) > 90
+    dragStartRef.current = null
+    dragLockedRef.current = false
+    if (shouldSwipe) void swipe(deltaX > 0 ? 'right' : 'left')
     else setDragX(0)
   }
 
@@ -118,23 +124,47 @@ export function CandidateSwipe({ jobs, selectedJobId, onSelectJob, onMatched }: 
             מתאים/ה
           </button>
         </div>
-        {notice && <p className="status-box">{notice}</p>}
-        {error && <p className="error-text">{error}</p>}
+        {notice && <p className="status-box" role="status" aria-live="polite">{notice}</p>}
+        {error && <p className="error-text" role="alert" aria-live="assertive">{error}</p>}
         {loading ? (
           <p className="empty">טוען מועמדים...</p>
         ) : candidate ? (
           <div
-            className={`swipe-stage ${swipeMood}`}
+            className={`swipe-stage ${swipeMood} ${isDragging ? 'dragging' : ''}`}
+            role="group"
+            aria-label={`כרטיס מועמד/ת ${candidate.firstName}. אפשר לגרור, או לבחור פסילה או התאמה.`}
+            tabIndex={0}
             onPointerDown={(event) => {
-              dragStartXRef.current = event.clientX
-              setIsDragging(true)
-              event.currentTarget.setPointerCapture(event.pointerId)
+              if (swipeExit || (event.target as HTMLElement).closest('button, a, input, select, textarea')) return
+              dragStartRef.current = { x: event.clientX, y: event.clientY, pointerId: event.pointerId }
+              dragLockedRef.current = false
             }}
             onPointerMove={(event) => {
-              if (isDragging && dragStartXRef.current !== null && !swipeExit) setDragX(event.clientX - dragStartXRef.current)
+              const start = dragStartRef.current
+              if (!start || event.pointerId !== start.pointerId || swipeExit) return
+              const deltaX = event.clientX - start.x
+              const deltaY = event.clientY - start.y
+              if (!dragLockedRef.current) {
+                if (Math.abs(deltaX) < 10 || Math.abs(deltaX) <= Math.abs(deltaY) * 1.25) return
+                dragLockedRef.current = true
+                event.currentTarget.setPointerCapture(event.pointerId)
+                setIsDragging(true)
+              }
+              setDragX(deltaX)
             }}
-            onPointerUp={endDrag}
-            onPointerCancel={endDrag}
+            onPointerUp={finishDrag}
+            onPointerCancel={(event) => {
+              if (dragStartRef.current?.pointerId !== event.pointerId) return
+              dragStartRef.current = null
+              dragLockedRef.current = false
+              setIsDragging(false)
+              setDragX(0)
+            }}
+            onKeyDown={(event) => {
+              if (event.target !== event.currentTarget || swipeExit) return
+              if (event.key === 'ArrowRight') { event.preventDefault(); void swipe('right') }
+              if (event.key === 'ArrowLeft') { event.preventDefault(); void swipe('left') }
+            }}
           >
             {candidates[1] && <div className="swipe-next-shadow" aria-hidden="true" />}
             <div
@@ -159,7 +189,7 @@ export function CandidateSwipe({ jobs, selectedJobId, onSelectJob, onMatched }: 
               <p>{candidate.bio || 'לא נוסף תיאור ניסיון.'}</p>
               <ul>
                 <li>גר/ה ב{candidate.city ?? '—'}</li>
-                <li>משמרות שהושלמו ב-WorkAway: {candidate.completedShifts}</li>
+                <li>משמרות שהושלמו ב-ShiftTed: {candidate.completedShifts}</li>
                 <li>
                   תחומים: {candidate.isFlexible ? 'פתוח/ה לכל התחומים' : candidate.categories.join(', ') || '—'}
                 </li>

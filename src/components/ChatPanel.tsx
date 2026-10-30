@@ -56,20 +56,27 @@ export function ChatPanel({ role, meId, defaultForm101Url, applications, selecte
   const [report, setReport] = useState({ reason: reportReasons[0], details: '' })
   const recorderRef = useRef<MediaRecorder | null>(null)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
+  const messageListRef = useRef<HTMLDivElement | null>(null)
+  const stickToBottomRef = useRef(true)
 
   const activeId = active?.id ?? null
 
   useEffect(() => {
     if (activeId === null) {
+      setMessages([])
+      setLoadingMessages(false)
       return
     }
     let alive = true
+    stickToBottomRef.current = true
     setLoadingMessages(true)
+    setMessages([])
+    setError('')
     setShowOfferForm(false)
     setSafetyMode('none')
     api.getMessages(activeId).then(
       (loaded) => alive && setMessages(loaded),
-      () => alive && setError('טעינת ההודעות נכשלה.'),
+      () => alive && setError('טעינת ההודעות נכשלה. אפשר לנסות לרענן את השיחה.'),
     ).finally(() => alive && setLoadingMessages(false))
     const unsubscribe = api.subscribeToMessages(activeId, (message) => {
       setMessages((previous) => (previous.some((item) => item.id === message.id) ? previous : [...previous, message]))
@@ -81,7 +88,9 @@ export function ChatPanel({ role, meId, defaultForm101Url, applications, selecte
   }, [activeId])
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ block: 'end' })
+    if (stickToBottomRef.current) {
+      messagesEndRef.current?.scrollIntoView({ block: 'end', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+    }
   }, [messages])
 
   if (threads.length === 0) {
@@ -168,7 +177,7 @@ export function ChatPanel({ role, meId, defaultForm101Url, applications, selecte
   const submitReport = () =>
     runAction(
       () => api.reportUser({ reportedId: counterpartId, reason: report.reason, details: report.details, applicationId: active?.id }),
-      'הדיווח נשלח לצוות WorkAway. תודה.',
+      'הדיווח נשלח לצוות ShiftTed. תודה.',
     ).then(() => setSafetyMode('none'))
 
   const confirmBlock = () =>
@@ -180,7 +189,7 @@ export function ChatPanel({ role, meId, defaultForm101Url, applications, selecte
     <section className="panel chat-layout">
       <article className="card chat-threads">
         <h2>שיחות</h2>
-        <div className="list">
+        <div className="list chat-thread-list">
           {threads.map((thread) => (
             <button
               key={thread.id}
@@ -206,7 +215,7 @@ export function ChatPanel({ role, meId, defaultForm101Url, applications, selecte
               {stageLabels[active.stage]}
               {role === 'employer' && ` · מדד אמינות ${active.worker.reliabilityScore}`}
             </small>
-            <div className="fit-actions">
+            <div className="fit-actions chat-safety-actions">
               <button type="button" className="ghost" onClick={() => setSafetyMode(safetyMode === 'report' ? 'none' : 'report')}>
                 דיווח
               </button>
@@ -218,6 +227,7 @@ export function ChatPanel({ role, meId, defaultForm101Url, applications, selecte
 
           {safetyMode === 'report' && (
             <div className="status-box">
+              <button type="button" className="ghost safety-close" onClick={() => setSafetyMode('none')}>סגירה</button>
               <label>
                 סיבת הדיווח
                 <select value={report.reason} onChange={(event) => setReport({ ...report, reason: event.target.value })}>
@@ -237,6 +247,7 @@ export function ChatPanel({ role, meId, defaultForm101Url, applications, selecte
           )}
           {safetyMode === 'block' && (
             <div className="status-box">
+              <button type="button" className="ghost safety-close" onClick={() => setSafetyMode('none')}>סגירה</button>
               <p>לחסום את {counterpartName}? תהליכים פתוחים ביניכם ייסגרו ולא תוכלו לשלוח הודעות.</p>
               <button type="button" className="primary" onClick={() => void confirmBlock()} disabled={busy}>
                 כן, לחסום
@@ -248,7 +259,7 @@ export function ChatPanel({ role, meId, defaultForm101Url, applications, selecte
             <div className="status-box offer-card">
               <strong>{offer.fromWaitlist ? 'תקן התפנה! הצעה מרשימת ההמתנה' : 'הצעת עבודה רשמית'}</strong>
               <span>
-                {formatDateTime(offer.startsAt)}–{formatDateTime(offer.endsAt).split(' ').pop()} · {offer.address}
+                <bdi dir="auto">{formatDateTime(offer.startsAt)}–{formatDateTime(offer.endsAt).split(' ').pop()}</bdi> · {offer.address}
               </span>
               <span>{formatPay(offer.payType, offer.payAmount)}</span>
               {offer.conditions && <span>תנאים: {offer.conditions}</span>}
@@ -321,8 +332,12 @@ export function ChatPanel({ role, meId, defaultForm101Url, applications, selecte
             />
           )}
 
-          <div className="chat-messages" aria-live="polite">
-            {loadingMessages && <p className="empty">טוען הודעות...</p>}
+          <div className="chat-messages" ref={messageListRef} onScroll={(event) => {
+            const list = event.currentTarget
+            stickToBottomRef.current = list.scrollHeight - list.scrollTop - list.clientHeight < 120
+          }} role="log" aria-label={`הודעות עם ${counterpartName}`} aria-live="polite" aria-relevant="additions text">
+            {loadingMessages && <p className="chat-loading" role="status" aria-live="polite"><span className="chat-loading-dot" />טוען את השיחה…</p>}
+            {!loadingMessages && messages.length === 0 && <p className="chat-empty-messages">אין עדיין הודעות בשיחה. אפשר לפתוח אותה בברכה קצרה.</p>}
             {messages.map((message) => (
               <div
                 key={message.id}
@@ -339,13 +354,14 @@ export function ChatPanel({ role, meId, defaultForm101Url, applications, selecte
             <div ref={messagesEndRef} />
           </div>
 
-          {notice && <p className="status-box">{notice}</p>}
-          {error && <p className="error-text">{error}</p>}
+          {notice && <p className="status-box" role="status" aria-live="polite">{notice}</p>}
+          {error && <p className="error-text" role="alert" aria-live="assertive">{error}</p>}
 
           {chatOpen ? (
             <div className="chat-input-row with-voice">
               <input
                 value={draft}
+                aria-label={role === 'worker' ? 'הודעה למעסיק' : 'הודעה למועמד או מועמדת'}
                 onChange={(event) => setDraft(event.target.value)}
                 placeholder={role === 'worker' ? 'כתבו למעסיק...' : 'כתבו למועמד/ת...'}
                 maxLength={2000}
@@ -362,7 +378,7 @@ export function ChatPanel({ role, meId, defaultForm101Url, applications, selecte
                 onClick={() => void toggleRecording()}
                 aria-label={recording ? 'עצירת הקלטה ושליחה' : 'הקלטת הודעה קולית'}
               >
-                {recording ? '⏹ שליחה' : '🎤'}
+                {recording ? 'עצירת הקלטה' : 'הקלטת הודעה קולית'}
               </button>
               <button type="button" className="primary" onClick={() => void send()} disabled={!draft.trim()}>
                 שלח

@@ -1,22 +1,32 @@
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;700;800&family=Outfit:wght@500;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Hebrew:wght@300;400;500;600;700;800&display=swap');
 
 :root {
-  --bg: #fff7ef;
-  --paper: #fffdf9;
-  --ink: #2f2647;
-  --ink-soft: #6f6489;
-  --brand-coral: #ff6e2f;
-  --brand-ink: #ff4ea3;
-  --brand-mint: #26c6a0;
-  --border: #e6cce5;
-  --theme-hot: #ff6a2b;
-  --theme-warm: #f84fa4;
-  --theme-fresh: #2dc29a;
-  --theme-line: #f0d4e8;
+  --bg: #f7f6fb;
+  --paper: #ffffff;
+  --ink: #17152b;
+  --ink-soft: #55536a;
+  --text-muted: #676579;
+  --brand-primary: #5b21b6;
+  --brand-primary-hover: #4c1d95;
+  --brand-secondary: #7c3aed;
+  --brand-success: #166534;
+  --brand-success-soft: #eff8df;
+  --brand-energy: #a3e635;
+  --brand-warning: #854d0e;
+  --brand-warning-soft: #fff7db;
+  --brand-danger: #991b1b;
+  --brand-danger-soft: #fef2f2;
+  --border: #e4e0ed;
+  --surface-muted: #f1ebff;
+  --surface-raised: #fbfaff;
+  --focus-ring: #5b21b6;
+  --radius-control: 13px;
+  --radius-card: 22px;
+  --shadow-card: 0 16px 42px -30px rgba(39, 28, 73, .36);
 
-  font-family: 'Plus Jakarta Sans', 'Heebo', 'Rubik', 'Assistant', 'Avenir Next', 'Segoe UI', sans-serif;
+  font-family: 'Noto Sans Hebrew', 'Arial', sans-serif;
   font-size: 16px;
-  line-height: 1.45;
+  line-height: 1.5;
   font-weight: 400;
   color: var(--ink);
   background: var(--bg);
@@ -32,13 +42,9 @@
 
 body {
   margin: 0;
-  min-height: 100vh;
+  min-height: 100dvh;
   color: var(--ink);
-  background:
-    radial-gradient(circle at 10% 8%, rgba(255, 122, 69, 0.26), transparent 34%),
-    radial-gradient(circle at 88% 5%, rgba(255, 78, 163, 0.2), transparent 30%),
-    radial-gradient(circle at 82% 74%, rgba(38, 198, 160, 0.2), transparent 34%),
-    linear-gradient(180deg, #fff6e9 0%, #fff3f9 50%, #edfff8 100%);
+  background: var(--bg);
 }
 
 #root {
@@ -55,12 +61,12 @@ p {
 h1,
 h2,
 h3 {
-  font-family: 'Outfit', 'Plus Jakarta Sans', sans-serif;
-  letter-spacing: -0.02em;
+  font-family: 'Noto Sans Hebrew', 'Arial', sans-serif;
+  letter-spacing: normal;
 }
 
 h1 {
-  font-size: clamp(1.95rem, 3vw, 2.55rem);
+  font-size: clamp(1.75rem, 3vw, 2.35rem);
   margin-bottom: 6px;
   letter-spacing: -0.03em;
 }
@@ -73,4 +79,17 @@ h2 {
 ul {
   padding-right: 18px;
   margin: 10px 0 0;
+}
+
+html { scroll-behavior: smooth; scroll-padding-block: 20px; }
+button, input, select, textarea { font: inherit; }
+button { touch-action: manipulation; }
+input[type='email'], input[type='url'], input[type='tel'], input[type='number'], input[type='date'], input[type='time'] { direction: ltr; text-align: left; font-variant-numeric: tabular-nums; }
+input[type='range'] { min-height: 28px; }
+input[type='checkbox'] { min-height: 24px; width: 24px; height: 24px; padding: 0; }
+:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 3px; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }

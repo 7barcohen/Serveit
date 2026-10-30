@@ -188,7 +188,7 @@ export function WorkerProfilePanel({ profile, cities, categories, onChanged }: P
         <h2>פרטים אישיים</h2>
         <label>
           שם מלא
-          <input value={details.fullName} onChange={(event) => setDetails({ ...details, fullName: event.target.value })} />
+          <input required autoComplete="name" value={details.fullName} onChange={(event) => setDetails({ ...details, fullName: event.target.value })} />
         </label>
         <p className="empty">מעסיקים רואים רק את השם הפרטי שלך.</p>
         <label>
@@ -197,6 +197,8 @@ export function WorkerProfilePanel({ profile, cities, categories, onChanged }: P
             type="number"
             min={16}
             max={99}
+            inputMode="numeric"
+            required
             value={details.age}
             onChange={(event) => setDetails({ ...details, age: Number(event.target.value) })}
           />
@@ -224,7 +226,7 @@ export function WorkerProfilePanel({ profile, cities, categories, onChanged }: P
         <p className="empty">טלפונים, מיילים וקישורים מוסתרים אוטומטית.</p>
         <div className="fit-actions">
           <button type="button" className="primary" onClick={saveDetails} disabled={busy}>
-            שמירת פרטים
+            {busy ? 'שומר/ת…' : 'שמירת פרטים'}
           </button>
           <button type="button" className="ghost" onClick={useCurrentLocation} disabled={busy}>
             שימוש במיקום הנוכחי
@@ -235,7 +237,7 @@ export function WorkerProfilePanel({ profile, cities, categories, onChanged }: P
       <article className="card">
         <h2>זמינות שבועית</h2>
         <p className="empty">סמנו מתי אתם בדרך כלל זמינים. בלי סימון = זמינות מלאה.</p>
-        <div className="heatmap" role="grid" aria-label="זמינות שבועית">
+        <div className="heatmap" role="group" aria-label="זמינות שבועית">
           <span />
           {shiftOptions.map((shift) => (
             <span key={shift} className="heatmap-head">
@@ -243,7 +245,7 @@ export function WorkerProfilePanel({ profile, cities, categories, onChanged }: P
             </span>
           ))}
           {dayLongNames.map((day, dayIndex) => (
-            <div key={day} className="heatmap-row" role="row">
+            <div key={day} className="heatmap-row">
               <span className="heatmap-head">{day}</span>
               {shiftOptions.map((shift) => {
                 const slot = `${dayIndex}:${shift}`
@@ -252,7 +254,6 @@ export function WorkerProfilePanel({ profile, cities, categories, onChanged }: P
                   <button
                     key={slot}
                     type="button"
-                    role="gridcell"
                     aria-pressed={on}
                     aria-label={`${day} ${shiftLabels[shift]}`}
                     className={`heatmap-cell ${on ? 'on' : ''}`}
@@ -269,7 +270,7 @@ export function WorkerProfilePanel({ profile, cities, categories, onChanged }: P
           disabled={busy}
           onClick={() => void run(() => api.setAvailabilitySlots(profile.id, slots), 'הזמינות השבועית נשמרה.')}
         >
-          שמירת זמינות
+          {busy ? 'שומר/ת…' : 'שמירת זמינות'}
         </button>
       </article>
 
@@ -304,6 +305,8 @@ export function WorkerProfilePanel({ profile, cities, categories, onChanged }: P
           שם הרישיון / התעודה
           <input
             list="license-suggestions"
+            required
+            autoComplete="off"
             value={newLicense.name}
             onChange={(event) => setNewLicense({ ...newLicense, name: event.target.value })}
           />
@@ -330,7 +333,7 @@ export function WorkerProfilePanel({ profile, cities, categories, onChanged }: P
           />
         </label>
         <button type="button" className="primary" onClick={addLicense} disabled={busy}>
-          הוספה
+          {busy ? 'מוסיף/ה…' : 'הוספה'}
         </button>
       </article>
 
@@ -375,8 +378,8 @@ export function WorkerProfilePanel({ profile, cities, categories, onChanged }: P
 
       {(message || error) && (
         <article className="card full-row">
-          {message && <p className="status-box">{message}</p>}
-          {error && <p className="error-text">{error}</p>}
+          {message && <p className="status-box" role="status" aria-live="polite">{message}</p>}
+          {error && <p className="error-text" role="alert" aria-live="assertive">{error}</p>}
         </article>
       )}
     </section>

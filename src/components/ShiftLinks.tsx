@@ -12,14 +12,14 @@ export function ShiftLinks({ application }: { application: Application }) {
     startsAt: offer.startsAt,
     endsAt: offer.endsAt,
     address: offer.address,
-    details: `משמרת דרך WorkAway. ${offer.conditions}`.trim(),
+    details: `משמרת דרך ShiftTed. ${offer.conditions}`.trim(),
   }
   return (
     <div className="fit-actions">
       <a className="ghost link-button" href={googleCalendarUrl(event)} target="_blank" rel="noreferrer">
         הוספה ל-Google Calendar
       </a>
-      <button type="button" className="ghost" onClick={() => downloadIcs(event, `workaway-shift-${application.id}.ics`)}>
+      <button type="button" className="ghost" onClick={() => downloadIcs(event, `shiftted-shift-${application.id}.ics`)}>
         הוספה ליומן (Apple / Outlook)
       </button>
       <a className="ghost link-button" href={wazeUrl(offer.address)} target="_blank" rel="noreferrer">

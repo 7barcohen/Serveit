@@ -92,19 +92,20 @@ export function OfferForm({ application, defaultForm101Url, onSent, onCancel }: 
       <div className="form-grid">
         <label>
           תאריך
-          <input type="date" value={form.date} onChange={(event) => update({ date: event.target.value })} />
+          <input type="date" required value={form.date} onChange={(event) => update({ date: event.target.value })} />
         </label>
         <label>
           משעה
-          <input type="time" value={form.startTime} onChange={(event) => update({ startTime: event.target.value })} />
+          <input type="time" required value={form.startTime} onChange={(event) => update({ startTime: event.target.value })} />
         </label>
         <label>
           עד שעה
-          <input type="time" value={form.endTime} onChange={(event) => update({ endTime: event.target.value })} />
+          <input type="time" required value={form.endTime} onChange={(event) => update({ endTime: event.target.value })} />
         </label>
         <label>
           כתובת מדויקת
           <input
+            required
             value={form.address}
             placeholder="רחוב, מספר, עיר"
             onChange={(event) => update({ address: event.target.value })}
@@ -114,6 +115,7 @@ export function OfferForm({ application, defaultForm101Url, onSent, onCancel }: 
           קישור לטופס 101 (לא חובה)
           <input
             type="url"
+            inputMode="url"
             value={form.form101Url}
             placeholder="https://..."
             onChange={(event) => update({ form101Url: event.target.value })}
@@ -130,6 +132,8 @@ export function OfferForm({ application, defaultForm101Url, onSent, onCancel }: 
           תעריף (₪)
           <input
             type="number"
+            inputMode="decimal"
+            required
             min={1}
             value={form.payAmount}
             onChange={(event) => update({ payAmount: Number(event.target.value) })}
@@ -155,10 +159,10 @@ export function OfferForm({ application, defaultForm101Url, onSent, onCancel }: 
         </label>
       </div>
       <p className="empty">אם מצרפים קישור לטופס 101, הוא יישלח לעובד/ת רק לאחר אישור ההצעה. אפשר להשאיר ריק.</p>
-      {error && <p className="error-text">{error}</p>}
+      {error && <p className="error-text" role="alert" aria-live="assertive">{error}</p>}
       <div className="swipe-actions">
         <button type="button" className="primary" onClick={() => void submit()} disabled={sending}>
-          {sending ? 'שולח...' : 'שלח הצעה'}
+          {sending ? 'שולח/ת…' : 'שלח הצעה'}
         </button>
         <button type="button" className="ghost" onClick={onCancel} disabled={sending}>
           ביטול

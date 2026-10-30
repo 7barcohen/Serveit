@@ -29,7 +29,7 @@ export const downloadIcs = (event: ShiftEvent, fileName: string) => {
   const lines = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//WorkAway//Shift//HE',
+    'PRODID:-//ShiftTed//Shift//HE',
     'BEGIN:VEVENT',
     `UID:${toIcsDate(event.startsAt)}-${Math.random().toString(36).slice(2)}@workaway`,
     `DTSTAMP:${toIcsDate(new Date().toISOString())}`,

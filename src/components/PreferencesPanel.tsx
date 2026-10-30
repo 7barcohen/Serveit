@@ -34,7 +34,7 @@ const dateKey = (date: Date) => {
 }
 
 // 2026-09-15 -> 15/09
-const shortDate = (value: string) => value.split('-').reverse().slice(0, 2).join('/')
+const shortDate = (value: string) => new Intl.DateTimeFormat('he-IL', { day: 'numeric', month: 'short' }).format(new Date(`${value}T12:00:00`))
 
 const toggleValue = <T,>(list: T[], value: T): T[] =>
   list.includes(value) ? list.filter((item) => item !== value) : [...list, value]
@@ -44,10 +44,10 @@ export function PreferenceSummary({ preference }: { preference: WorkerPreference
     <div>
       <strong>{employmentTypeLabels[preference.employmentType]}</strong>
       <p>
-        אזור: {preference.city ?? 'מהמיקום שלי'} ועד {preference.radiusKm} ק״מ
+        אזור: {preference.city ?? 'מהמיקום שלי'} ועד {preference.radiusKm.toLocaleString('he-IL')} ק״מ
       </p>
       <p>
-        שכר מינימלי: {preference.minHourlyPay} ש"ח לשעה
+        שכר מינימלי: {preference.minHourlyPay.toLocaleString('he-IL')} ש"ח לשעה
         {preference.employmentType === 'permanent' && preference.minMonthlyPay > 0 && ` או ${preference.minMonthlyPay.toLocaleString('he-IL')} ש"ח לחודש`}
       </p>
       <p>תחומים: {preference.categories.length > 0 ? preference.categories.join(', ') : 'פתוח/ה לכל התחומים'}</p>
@@ -194,6 +194,7 @@ export function PreferencesPanel({ profile, cities, categories, onChanged }: Pro
                 key={type}
                 type="button"
                 className={`pill ${preferenceForm.employmentType === type ? 'selected' : ''}`}
+                aria-pressed={preferenceForm.employmentType === type}
                 onClick={() => updatePreferenceForm({ employmentType: type })}
               >
                 {employmentTypeLabels[type]}
@@ -257,6 +258,7 @@ export function PreferencesPanel({ profile, cities, categories, onChanged }: Pro
                     key={workload}
                     type="button"
                     className={`pill ${preferenceForm.workloads.includes(workload) ? 'selected' : ''}`}
+                    aria-pressed={preferenceForm.workloads.includes(workload)}
                     onClick={() => updatePreferenceForm({ workloads: toggleValue(preferenceForm.workloads, workload) })}
                   >
                     {workloadLabels[workload]}
@@ -272,6 +274,7 @@ export function PreferencesPanel({ profile, cities, categories, onChanged }: Pro
             <button
               type="button"
               className={`pill ${preferenceForm.categories.length === 0 ? 'selected' : ''}`}
+              aria-pressed={preferenceForm.categories.length === 0}
               onClick={() => updatePreferenceForm({ categories: [] })}
             >
               פתוח/ה לכל התחומים
@@ -281,6 +284,7 @@ export function PreferencesPanel({ profile, cities, categories, onChanged }: Pro
                 key={category.id}
                 type="button"
                 className={`pill ${preferenceForm.categories.includes(category.name) ? 'selected' : ''}`}
+                aria-pressed={preferenceForm.categories.includes(category.name)}
                 onClick={() => updatePreferenceForm({ categories: toggleValue(preferenceForm.categories, category.name) })}
               >
                 {category.name}
@@ -300,8 +304,8 @@ export function PreferencesPanel({ profile, cities, categories, onChanged }: Pro
         <button type="button" className="primary" onClick={() => void addWorkerPreference()} disabled={saving}>
           {saving ? 'שומר...' : 'שמירת העדפה'}
         </button>
-        {preferencesMessage && <p className="status-box">{preferencesMessage}</p>}
-        {error && <p className="error-text">{error}</p>}
+        {preferencesMessage && <p className="status-box" role="status" aria-live="polite">{preferencesMessage}</p>}
+        {error && <p className="error-text" role="alert" aria-live="assertive">{error}</p>}
       </article>
 
       {formIsTemporary && (
@@ -335,6 +339,8 @@ export function PreferencesPanel({ profile, cities, categories, onChanged }: Pro
                   key={key}
                   type="button"
                   className={`calendar-day ${selected ? 'selected' : ''}`}
+                  aria-label={new Intl.DateTimeFormat('he-IL', { weekday: 'long', day: 'numeric', month: 'long' }).format(day)}
+                  aria-pressed={selected}
                   onClick={() => toggleAvailabilityDate(day)}
                   disabled={key < today}
                 >

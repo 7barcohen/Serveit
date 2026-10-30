@@ -152,8 +152,8 @@ export function CompanyProfile({ profile, plans, onChanged }: Props) {
     <section className="panel employer-grid">
       {(error || notice) && (
         <article className="card full-row">
-          {error && <p className="error-text">{error}</p>}
-          {notice && <p className="status-box">{notice}</p>}
+          {error && <p className="error-text" role="alert" aria-live="assertive">{error}</p>}
+          {notice && <p className="status-box" role="status" aria-live="polite">{notice}</p>}
         </article>
       )}
 
@@ -164,7 +164,7 @@ export function CompanyProfile({ profile, plans, onChanged }: Props) {
           {profile.logoUrl ? <img className="company-logo large" src={profile.logoUrl} alt="לוגו" /> : <span className="company-logo placeholder large">{profile.displayName.slice(0, 1)}</span>}
           <label className="ghost file-button">
             {profile.logoUrl ? 'החלפת לוגו' : 'העלאת לוגו'}
-            <input type="file" accept="image/*" hidden disabled={busy} onChange={(event) => void uploadImage(event.target.files?.[0], 'logo')} />
+            <input type="file" aria-label={profile.logoUrl ? 'החלפת לוגו העסק' : 'העלאת לוגו העסק'} accept="image/*" hidden disabled={busy} onChange={(event) => void uploadImage(event.target.files?.[0], 'logo')} />
           </label>
         </div>
         <label>
@@ -188,6 +188,7 @@ export function CompanyProfile({ profile, plans, onChanged }: Props) {
                 key={region}
                 type="button"
                 className={`pill ${publicForm.regions.includes(region) ? 'selected' : ''}`}
+                aria-pressed={publicForm.regions.includes(region)}
                 onClick={() =>
                   setPublicForm({
                     ...publicForm,
@@ -242,7 +243,7 @@ export function CompanyProfile({ profile, plans, onChanged }: Props) {
       <article className="card">
         <h2>אימות עסק</h2>
         <p className={verificationStatus.className}>{verificationStatus.label}</p>
-        <p className="empty">הפרטים האלה גלויים רק לצוות WorkAway, לא לעובדים.</p>
+        <p className="empty">הפרטים האלה גלויים רק לצוות ShiftTed, לא לעובדים.</p>
         <label>
           ח.פ. / עוסק מורשה
           <input
@@ -294,7 +295,7 @@ export function CompanyProfile({ profile, plans, onChanged }: Props) {
           {trialActive && ` · חודשיים חינם עד ${formatDate(profile.trialEndsAt)}`}
         </p>
         {profile.subscriptionStatus === 'pending_payment' && (
-          <p className="status-box">בחרת מסלול. צוות WorkAway יחזור אליך להסדרת התשלום, והחשבון יופעל עם האישור.</p>
+          <p className="status-box">בחרת מסלול. צוות ShiftTed יחזור אליך להסדרת התשלום, והחשבון יופעל עם האישור.</p>
         )}
         <div className="plans">
           {plans.map((plan) => (
@@ -303,6 +304,7 @@ export function CompanyProfile({ profile, plans, onChanged }: Props) {
               key={plan.id}
               onClick={() => setSelectedPlan(plan.id)}
               className={`plan ${selectedPlan === plan.id ? 'selected' : ''}`}
+              aria-pressed={selectedPlan === plan.id}
             >
               <strong>
                 {plan.name}

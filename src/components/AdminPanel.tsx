@@ -23,6 +23,21 @@ const sourceLabels: Record<string, string> = {
   review: 'דירוג',
 }
 
+const adminTabIcons: Record<AdminTab, string> = {
+  overview: 'M3 3h8v8H3zM13 3h8v5h-8zM13 10h8v11h-8zM3 13h8v8H3z',
+  users: 'M16 20v-1.5a4.5 4.5 0 0 0-4.5-4.5h-3A4.5 4.5 0 0 0 4 18.5V20m6-9a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm7-7.5a4 4 0 0 1 0 7.5m3 9v-1.5a4.5 4.5 0 0 0-3.5-4.4',
+  safety: 'M12 3 20 6v5c0 5-3.4 8.3-8 10-4.6-1.7-8-5-8-10V6l8-3Zm-3.5 9 2.3 2.3 4.8-5',
+  finance: 'M4 19V5m0 14h17M8 15l4-4 3 2 5-6',
+  content: 'M5 5h14M5 12h14M5 19h14M3 5h.01M3 12h.01M3 19h.01',
+}
+const adminMobileLabels: Record<AdminTab, string> = {
+  overview: 'סקירה',
+  users: 'משתמשים',
+  safety: 'בטיחות',
+  finance: 'כספים',
+  content: 'תוכן',
+}
+
 // Admin panel (spec §7): verification, suspensions, DLP & reports, finance,
 // statistics and category management.
 export function AdminPanel({ plans, categories, onCategoriesChanged }: {
@@ -41,10 +56,12 @@ export function AdminPanel({ plans, categories, onCategoriesChanged }: {
   const [rejectNotes, setRejectNotes] = useState<Record<number, string>>({})
   const [newCategory, setNewCategory] = useState({ name: '', requiredLicense: '' })
   const [busy, setBusy] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
 
   const refresh = useCallback(async () => {
+    setRefreshing(true)
     try {
       const [stats, userRows, violationRows, reportRows, sponsorshipRows, licenseRows] = await Promise.all([
         api.getAdminOverview(),
@@ -63,6 +80,8 @@ export function AdminPanel({ plans, categories, onCategoriesChanged }: {
       setError('')
     } catch (caught) {
       setError(errorMessage(caught, 'טעינת נתוני אדמין נכשלה.'))
+    } finally {
+      setRefreshing(false)
     }
   }, [])
 
@@ -102,7 +121,7 @@ export function AdminPanel({ plans, categories, onCategoriesChanged }: {
 
   return (
     <section className="worker-shell">
-      <nav className="worker-dock">
+      <nav className="worker-dock admin-mobile-dock" aria-label="ניווט אדמין">
         {(
           [
             ['overview', 'סקירה'],
@@ -112,16 +131,18 @@ export function AdminPanel({ plans, categories, onCategoriesChanged }: {
             ['content', 'קטגוריות'],
           ] as Array<[AdminTab, string]>
         ).map(([key, label]) => (
-          <button key={key} type="button" className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>
-            {label}
+          <button key={key} type="button" className={tab === key ? 'active' : ''} aria-label={label} title={label} aria-current={tab === key ? 'page' : undefined} onClick={() => setTab(key)}>
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d={adminTabIcons[key]} stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            <span className="admin-nav-desktop-label">{label}</span>
+            <span className="admin-nav-mobile-label">{adminMobileLabels[key]}{key === 'safety' && openReports.length > 0 ? ` ${openReports.length}` : ''}</span>
           </button>
         ))}
       </nav>
 
       {(error || notice) && (
         <article className="card">
-          {error && <p className="error-text">{error}</p>}
-          {notice && <p className="status-box">{notice}</p>}
+          {error && <p className="error-text" role="alert" aria-live="assertive">{error}</p>}
+          {notice && <p className="status-box" role="status" aria-live="polite">{notice}</p>}
         </article>
       )}
 
@@ -145,10 +166,13 @@ export function AdminPanel({ plans, categories, onCategoriesChanged }: {
                 <span>אחוז אי-הגעה: {overview.noShowRate}%</span>
               </div>
             ) : (
-              <p className="empty">טוען...</p>
+              <div className="admin-loading" role="status" aria-live="polite">
+                <span className="admin-skeleton" /><span className="admin-skeleton" /><span className="admin-skeleton" />
+                <p className="empty">טוען נתוני מערכת…</p>
+              </div>
             )}
-            <button type="button" className="ghost" onClick={() => void refresh()}>
-              רענון
+            <button type="button" className="ghost" onClick={() => void refresh()} disabled={refreshing || busy}>
+              {refreshing ? 'מעדכן/ת…' : 'רענון'}
             </button>
           </article>
           <article className="card">
@@ -191,12 +215,15 @@ export function AdminPanel({ plans, categories, onCategoriesChanged }: {
                     <button type="button" className="primary" disabled={busy} onClick={() => void run(() => api.verifyEmployer(user.id, true), 'העסק אומת.')}>
                       אישור
                     </button>
-                    <input
-                      className="compact-input wide"
-                      placeholder="סיבת דחייה"
-                      value={rejectNotes[user.id] ?? ''}
-                      onChange={(event) => setRejectNotes({ ...rejectNotes, [user.id]: event.target.value })}
-                    />
+                    <label className="admin-reject-note">
+                      <span>סיבת דחייה</span>
+                      <input
+                        className="compact-input wide"
+                        aria-label={`סיבת דחייה עבור ${user.employer!.displayName}`}
+                        value={rejectNotes[user.id] ?? ''}
+                        onChange={(event) => setRejectNotes({ ...rejectNotes, [user.id]: event.target.value })}
+                      />
+                    </label>
                     <button
                       type="button"
                       className="ghost"
@@ -340,7 +367,7 @@ export function AdminPanel({ plans, categories, onCategoriesChanged }: {
                   <span>
                     מדווח/ת: {report.reporterEmail} ← על: {report.reportedEmail}
                   </span>
-                  {report.details && <span>{report.details}</span>}
+                  {report.details && <span className="admin-user-content">{report.details}</span>}
                   <small>{formatDateTime(report.createdAt)}</small>
                   {report.status === 'open' && (
                     <div className="fit-actions">
@@ -395,7 +422,7 @@ export function AdminPanel({ plans, categories, onCategoriesChanged }: {
                   <strong>
                     {violation.email} · {sourceLabels[violation.source] ?? violation.source}
                   </strong>
-                  <span className="dlp-text">{violation.originalText}</span>
+                  <span className="dlp-text admin-user-content">{violation.originalText}</span>
                   <small>{formatDateTime(violation.createdAt)}</small>
                 </div>
               ))}

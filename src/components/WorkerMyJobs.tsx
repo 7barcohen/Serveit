@@ -60,9 +60,9 @@ function EmployerReviewForm({ application, onDone }: { application: Application;
         הערה (לא חובה)
         <input value={comment} onChange={(event) => setComment(event.target.value)} />
       </label>
-      {error && <p className="error-text">{error}</p>}
+      {error && <p className="error-text" role="alert" aria-live="assertive">{error}</p>}
       <button type="button" className="primary" onClick={() => void submit()} disabled={sending}>
-        שליחת דירוג
+        {sending ? 'שולח/ת דירוג…' : 'שליחת דירוג'}
       </button>
     </div>
   )
@@ -80,7 +80,9 @@ export function WorkerMyJobs({ applications, onChanged, onOpenChat }: Props) {
   const [notice, setNotice] = useState('')
 
   const byStage = (...stages: Application['stage'][]) => applications.filter((item) => stages.includes(item.stage))
-  const offers = byStage('offered')
+  const offers = byStage('offered').filter(
+    (item): item is Application & { offer: NonNullable<Application['offer']> } => item.offer !== null,
+  )
   const upcoming = byStage('hired').sort((a, b) => (a.offer?.startsAt ?? '').localeCompare(b.offer?.startsAt ?? ''))
   const waitlisted = byStage('waitlisted')
   const matched = byStage('matched')
@@ -108,8 +110,8 @@ export function WorkerMyJobs({ applications, onChanged, onOpenChat }: Props) {
     <section className="panel employer-grid">
       {(error || notice) && (
         <article className="card full-row">
-          {error && <p className="error-text">{error}</p>}
-          {notice && <p className="status-box">{notice}</p>}
+          {error && <p className="error-text" role="alert" aria-live="assertive">{error}</p>}
+          {notice && <p className="status-box" role="status" aria-live="polite">{notice}</p>}
         </article>
       )}
 
@@ -125,21 +127,20 @@ export function WorkerMyJobs({ applications, onChanged, onOpenChat }: Props) {
           <h2>הצעות עבודה שממתינות לך</h2>
           <div className="list">
             {offers.map((item) => {
-              const offer = item.offer
-              if (!offer) return null
+              const applicationOffer = item.offer
               return (
               <div key={item.id} className="list-item">
                 <strong>
-                  {offer.fromWaitlist ? 'תקן התפנה! ' : ''}
+                  {applicationOffer.fromWaitlist ? 'תקן התפנה! ' : ''}
                   {item.job.title} · {item.employer.name}
                 </strong>
                 <span>
-                  {formatDateTime(offer.startsAt)} · {offer.address}
+                  {formatDateTime(applicationOffer.startsAt)} · {applicationOffer.address}
                 </span>
-                <span>{formatPay(offer.payType, offer.payAmount)}</span>
-                {offer.conditions && <span>תנאים: {offer.conditions}</span>}
-                {offer.form101Url && <a href={offer.form101Url} target="_blank" rel="noreferrer">פתיחת טופס 101</a>}
-                <span className="countdown">{formatTimeLeft(offer.expiresAt, now)}</span>
+                <span>{formatPay(applicationOffer.payType, applicationOffer.payAmount)}</span>
+                {applicationOffer.conditions && <span>תנאים: {applicationOffer.conditions}</span>}
+                {applicationOffer.form101Url && <a href={applicationOffer.form101Url} target="_blank" rel="noreferrer">פתיחת טופס 101</a>}
+                <span className="countdown">{formatTimeLeft(applicationOffer.expiresAt, now)}</span>
                 <div className="fit-actions">
                   <button
                     type="button"
@@ -147,20 +148,20 @@ export function WorkerMyJobs({ applications, onChanged, onOpenChat }: Props) {
                     disabled={busyId === item.id}
                     onClick={() =>
                       void run(item.id, async () => {
-                        const stage = await api.respondJobOffer(offer.id, true)
+                        const stage = await api.respondJobOffer(applicationOffer.id, true)
                         if (stage === 'waitlisted') throw new Error('המשרה התמלאה ברגע האחרון. נכנסת לרשימת ההמתנה.')
-                      }, offer.form101Url ? 'שובצת! קישור לטופס 101 נשלח בצ׳אט.' : 'שובצת! להצעה זו לא צורף טופס 101.')
+                      }, applicationOffer.form101Url ? 'שובצת! קישור לטופס 101 נשלח בצ׳אט.' : 'שובצת! להצעה זו לא צורף טופס 101.')
                     }
                   >
-                    אישור
+                    {busyId === item.id ? 'מעדכן/ת…' : 'אישור'}
                   </button>
                   <button
                     type="button"
                     className="ghost"
                     disabled={busyId === item.id}
-                    onClick={() => void run(item.id, () => api.respondJobOffer(offer.id, false), 'ההצעה נדחתה.')}
+                    onClick={() => void run(item.id, () => api.respondJobOffer(applicationOffer.id, false), 'ההצעה נדחתה.')}
                   >
-                    דחייה
+                    {busyId === item.id ? 'מעדכן/ת…' : 'דחייה'}
                   </button>
                   <button type="button" className="ghost" onClick={() => onOpenChat(item.id)}>
                     צ׳אט
@@ -211,7 +212,7 @@ export function WorkerMyJobs({ applications, onChanged, onOpenChat }: Props) {
                       </p>
                       <label>
                         סיבת הביטול
-                        <input value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} />
+                        <input required minLength={2} value={cancelReason} onChange={(event) => setCancelReason(event.target.value)} />
                       </label>
                       <button
                         type="button"
@@ -224,7 +225,7 @@ export function WorkerMyJobs({ applications, onChanged, onOpenChat }: Props) {
                           })
                         }
                       >
-                        אישור ביטול
+                        {busyId === item.id ? 'מבטל/ת…' : 'אישור ביטול'}
                       </button>
                     </div>
                   )}

@@ -62,8 +62,8 @@ export function EmployerHistory({ jobs, applications, onChanged, onOpenChat }: P
     <section className="panel employer-grid">
       {(error || notice) && (
         <article className="card full-row">
-          {error && <p className="error-text">{error}</p>}
-          {notice && <p className="status-box">{notice}</p>}
+          {error && <p className="error-text" role="alert" aria-live="assertive">{error}</p>}
+          {notice && <p className="status-box" role="status" aria-live="polite">{notice}</p>}
         </article>
       )}
 

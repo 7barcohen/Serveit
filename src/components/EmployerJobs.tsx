@@ -163,8 +163,8 @@ export function EmployerJobs({
     <section className="panel employer-grid">
       {(error || notice) && (
         <article className="card full-row">
-          {error && <p className="error-text">{error}</p>}
-          {notice && <p className="status-box">{notice}</p>}
+          {error && <p className="error-text" role="alert" aria-live="assertive">{error}</p>}
+          {notice && <p className="status-box" role="status" aria-live="polite">{notice}</p>}
         </article>
       )}
 
@@ -174,7 +174,7 @@ export function EmployerJobs({
           <div className="status-box">
             <p>
               {profile.verificationRequestedAt
-                ? 'אימות העסק ממתין לאישור צוות WorkAway. אפשר יהיה לפרסם מיד אחרי האישור.'
+                ? 'אימות העסק ממתין לאישור צוות ShiftTed. אפשר יהיה לפרסם מיד אחרי האישור.'
                 : 'לפני פרסום משרות יש להשלים אימות עסק (ח.פ. / עוסק מורשה).'}
             </p>
             <button type="button" className="ghost" onClick={onOpenCompany}>
@@ -313,7 +313,7 @@ export function EmployerJobs({
             </label>
           )}
           <p className="empty">טלפונים, מיילים וקישורים בתיאור מוסתרים אוטומטית.</p>
-          <button type="button" className="primary" onClick={() => void publishJob()}>
+          <button type="button" className="primary" onClick={() => void publishJob()} disabled={publishing}>
             {publishing ? 'מפרסם...' : 'פרסם משרה'}
           </button>
         </fieldset>
@@ -401,7 +401,7 @@ export function EmployerJobs({
                         מועמדים
                       </button>
                     )}
-                    <button type="button" className="ghost" onClick={() => setExpandedJobId(expanded ? null : job.id)}>
+                    <button type="button" className="ghost" aria-expanded={expanded} onClick={() => setExpandedJobId(expanded ? null : job.id)}>
                       {expanded ? 'הסתרה' : 'ניהול'}
                     </button>
                   </div>
@@ -485,6 +485,8 @@ export function EmployerJobs({
                               <label>
                                 סיבת הביטול
                                 <input
+                                  required
+                                  minLength={2}
                                   value={cancelState.reason}
                                   onChange={(event) => setCancelState({ ...cancelState, reason: event.target.value })}
                                 />

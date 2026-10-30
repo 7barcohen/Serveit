@@ -11,7 +11,7 @@ export function Landing({ onStart, onLogin }: Props) {
   return (
     <section className="landing">
       <header className="card landing-hero">
-        <p className="eyebrow">WorkAway</p>
+        <p className="eyebrow">ShiftTed</p>
         <h1>עבודה שמתאימה לך. עובדים שמגיעים.</h1>
         <p className="subtitle">
           שוק עבודה ישראלי לשני הצדדים: משמרות זמניות ומשרות קבועות, התאמה הדדית בהחלקה, צ׳אט מוגן ומדד אמינות
@@ -21,7 +21,7 @@ export function Landing({ onStart, onLogin }: Props) {
           <button type="button" className="primary" onClick={() => onStart('worker')}>
             אני מחפש/ת עבודה
           </button>
-          <button type="button" className="primary" onClick={() => onStart('employer')}>
+          <button type="button" className="ghost landing-employer-cta" onClick={() => onStart('employer')}>
             אני מעסיק/ה
           </button>
           <button type="button" className="ghost" onClick={onLogin}>
